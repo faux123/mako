@@ -69,7 +69,7 @@ struct jit_ctx {
 #endif
 };
 
-int bpf_jit_enable __read_mostly;
+int bpf_jit_enable __read_mostly = 1;	//enable by default
 
 static u64 jit_get_skb_b(struct sk_buff *skb, unsigned offset)
 {

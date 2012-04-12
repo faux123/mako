@@ -233,6 +233,7 @@ enum {
 	BPF_S_ANC_RXHASH,
 	BPF_S_ANC_CPU,
 	BPF_S_ANC_ALU_XOR_X,
+	BPF_S_ANC_SECCOMP_LD_W,
 };
 
 #endif /* __KERNEL__ */

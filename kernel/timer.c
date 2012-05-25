@@ -331,7 +331,8 @@ void set_timer_slack(struct timer_list *timer, int slack_hz)
 }
 EXPORT_SYMBOL_GPL(set_timer_slack);
 
-static void internal_add_timer(struct tvec_base *base, struct timer_list *timer)
+static void
+__internal_add_timer(struct tvec_base *base, struct timer_list *timer)
 {
 	unsigned long expires = timer->expires;
 	unsigned long idx = expires - base->timer_jiffies;
@@ -372,6 +373,17 @@ static void internal_add_timer(struct tvec_base *base, struct timer_list *timer)
 	 * Timers are FIFO:
 	 */
 	list_add_tail(&timer->entry, vec);
+}
+
+static void internal_add_timer(struct tvec_base *base, struct timer_list *timer)
+{
+	__internal_add_timer(base, timer);
+	/*
+	 * Update base->next_timer if this is the earliest one.
+	 */
+	if (time_before(timer->expires, base->next_timer) &&
+	    !tbase_get_deferrable(timer->base))
+		base->next_timer = timer->expires;
 }
 
 #ifdef CONFIG_TIMER_STATS
@@ -760,9 +772,6 @@ __mod_timer(struct timer_list *timer, unsigned long expires,
 	}
 
 	timer->expires = expires;
-	if (time_before(timer->expires, base->next_timer) &&
-	    !tbase_get_deferrable(timer->base))
-		base->next_timer = timer->expires;
 	internal_add_timer(base, timer);
 
 out_unlock:
@@ -922,9 +931,6 @@ void add_timer_on(struct timer_list *timer, int cpu)
 	spin_lock_irqsave(&base->lock, flags);
 	timer_set_base(timer, base);
 	debug_activate(timer, timer->expires);
-	if (time_before(timer->expires, base->next_timer) &&
-	    !tbase_get_deferrable(timer->base))
-		base->next_timer = timer->expires;
 	internal_add_timer(base, timer);
 	/*
 	 * Check whether the other CPU is idle and needs to be
@@ -1076,7 +1082,8 @@ static int cascade(struct tvec_base *base, struct tvec *tv, int index)
 	 */
 	list_for_each_entry_safe(timer, tmp, &tv_list, entry) {
 		BUG_ON(tbase_get_base(timer->base) != base);
-		internal_add_timer(base, timer);
+		/* No accounting, while moving them */
+		__internal_add_timer(base, timer);
 	}
 
 	return index;
@@ -1703,9 +1710,6 @@ static void migrate_timer_list(struct tvec_base *new_base, struct list_head *hea
 		timer = list_first_entry(head, struct timer_list, entry);
 		detach_timer(timer, false);
 		timer_set_base(timer, new_base);
-		if (time_before(timer->expires, new_base->next_timer) &&
-		    !tbase_get_deferrable(timer->base))
-			new_base->next_timer = timer->expires;
 		internal_add_timer(new_base, timer);
 	}
 }

@@ -36,13 +36,13 @@
 
 /*
  * Lock order:
- *   1. slub_lock (Global Semaphore)
+ *   1. slab_mutex (Global Mutex)
  *   2. node->list_lock
  *   3. slab_lock(page) (Only on some arches and for debugging)
  *
- *   slub_lock
+ *   slab_mutex
  *
- *   The role of the slub_lock is to protect the list of all the slabs
+ *   The role of the slab_mutex is to protect the list of all the slabs
  *   and to synchronize major metadata changes to slab cache structures.
  *
  *   The slab_lock is only used for debugging and on arches that do not
@@ -182,10 +182,6 @@ static int kmem_size = sizeof(struct kmem_cache);
 #ifdef CONFIG_SMP
 static struct notifier_block slab_notifier;
 #endif
-
-/* A list of all slab caches on the system */
-static DECLARE_RWSEM(slub_lock);
-static LIST_HEAD(slab_caches);
 
 /*
  * Tracking user of a slab.
@@ -3180,11 +3176,11 @@ static inline int kmem_cache_close(struct kmem_cache *s)
  */
 void kmem_cache_destroy(struct kmem_cache *s)
 {
-	down_write(&slub_lock);
+	mutex_lock(&slab_mutex);
 	s->refcount--;
 	if (!s->refcount) {
 		list_del(&s->list);
-		up_write(&slub_lock);
+		mutex_unlock(&slab_mutex);
 		if (kmem_cache_close(s)) {
 			printk(KERN_ERR "SLUB %s: %s called for cache that "
 				"still has objects.\n", s->name, __func__);
@@ -3194,7 +3190,7 @@ void kmem_cache_destroy(struct kmem_cache *s)
 			rcu_barrier();
 		sysfs_slab_remove(s);
 	} else
-		up_write(&slub_lock);
+		mutex_unlock(&slab_mutex);
 }
 EXPORT_SYMBOL(kmem_cache_destroy);
 
@@ -3256,7 +3252,7 @@ static struct kmem_cache *__init create_kmalloc_cache(const char *name,
 
 	/*
 	 * This function is called with IRQs disabled during early-boot on
-	 * single CPU so there's no need to take slub_lock here.
+	 * single CPU so there's no need to take slab_mutex here.
 	 */
 	if (!kmem_cache_open(s, name, size, ARCH_KMALLOC_MINALIGN,
 								flags, NULL))
@@ -3541,10 +3537,10 @@ static int slab_mem_going_offline_callback(void *arg)
 {
 	struct kmem_cache *s;
 
-	down_read(&slub_lock);
+	mutex_lock(&slab_mutex);
 	list_for_each_entry(s, &slab_caches, list)
 		kmem_cache_shrink(s);
-	up_read(&slub_lock);
+	mutex_unlock(&slab_mutex);
 
 	return 0;
 }
@@ -3565,7 +3561,7 @@ static void slab_mem_offline_callback(void *arg)
 	if (offline_node < 0)
 		return;
 
-	down_read(&slub_lock);
+	mutex_lock(&slab_mutex);
 	list_for_each_entry(s, &slab_caches, list) {
 		n = get_node(s, offline_node);
 		if (n) {
@@ -3581,7 +3577,7 @@ static void slab_mem_offline_callback(void *arg)
 			kmem_cache_free(kmem_cache_node, n);
 		}
 	}
-	up_read(&slub_lock);
+	mutex_unlock(&slab_mutex);
 }
 
 static int slab_mem_going_online_callback(void *arg)
@@ -3604,7 +3600,7 @@ static int slab_mem_going_online_callback(void *arg)
 	 * allocate a kmem_cache_node structure in order to bring the node
 	 * online.
 	 */
-	down_read(&slub_lock);
+	mutex_lock(&slab_mutex);
 	list_for_each_entry(s, &slab_caches, list) {
 		/*
 		 * XXX: kmem_cache_alloc_node will fallback to other nodes
@@ -3620,7 +3616,7 @@ static int slab_mem_going_online_callback(void *arg)
 		s->node[nid] = n;
 	}
 out:
-	up_read(&slub_lock);
+	mutex_unlock(&slab_mutex);
 	return ret;
 }
 
@@ -3918,7 +3914,7 @@ struct kmem_cache *__kmem_cache_create(const char *name, size_t size,
 	struct kmem_cache *s;
 	char *n;
 
-	down_write(&slub_lock);
+	mutex_lock(&slab_mutex);
 	s = find_mergeable(size, align, flags, name, ctor);
 	if (s) {
 		s->refcount++;
@@ -3933,7 +3929,7 @@ struct kmem_cache *__kmem_cache_create(const char *name, size_t size,
 			s->refcount--;
 			goto err;
 		}
-		up_write(&slub_lock);
+		mutex_unlock(&slab_mutex);
 		return s;
 	}
 
@@ -3946,9 +3942,9 @@ struct kmem_cache *__kmem_cache_create(const char *name, size_t size,
 		if (kmem_cache_open(s, n,
 				size, align, flags, ctor)) {
 			list_add(&s->list, &slab_caches);
-			up_write(&slub_lock);
+			mutex_unlock(&slab_mutex);
 			if (sysfs_slab_add(s)) {
-				down_write(&slub_lock);
+				mutex_lock(&slab_mutex);
 				list_del(&s->list);
 				kfree(n);
 				kfree(s);
@@ -3960,7 +3956,7 @@ struct kmem_cache *__kmem_cache_create(const char *name, size_t size,
 	}
 	kfree(n);
 err:
-	up_write(&slub_lock);
+	mutex_unlock(&slab_mutex);
 	return s;
 }
 
@@ -3981,13 +3977,13 @@ static int __cpuinit slab_cpuup_callback(struct notifier_block *nfb,
 	case CPU_UP_CANCELED_FROZEN:
 	case CPU_DEAD:
 	case CPU_DEAD_FROZEN:
-		down_read(&slub_lock);
+		mutex_lock(&slab_mutex);
 		list_for_each_entry(s, &slab_caches, list) {
 			local_irq_save(flags);
 			__flush_cpu_slab(s, cpu);
 			local_irq_restore(flags);
 		}
-		up_read(&slub_lock);
+		mutex_unlock(&slab_mutex);
 		break;
 	default:
 		break;
@@ -5363,11 +5359,11 @@ static int __init slab_sysfs_init(void)
 	struct kmem_cache *s;
 	int err;
 
-	down_write(&slub_lock);
+	mutex_lock(&slab_mutex);
 
 	slab_kset = kset_create_and_add("slab", &slab_uevent_ops, kernel_kobj);
 	if (!slab_kset) {
-		up_write(&slub_lock);
+		mutex_unlock(&slab_mutex);
 		printk(KERN_ERR "Cannot register slab subsystem.\n");
 		return -ENOSYS;
 	}
@@ -5392,7 +5388,7 @@ static int __init slab_sysfs_init(void)
 		kfree(al);
 	}
 
-	up_write(&slub_lock);
+	mutex_unlock(&slab_mutex);
 	resiliency_test();
 	return 0;
 }
@@ -5418,7 +5414,7 @@ static void *s_start(struct seq_file *m, loff_t *pos)
 {
 	loff_t n = *pos;
 
-	down_read(&slub_lock);
+	mutex_lock(&slab_mutex);
 	if (!n)
 		print_slabinfo_header(m);
 
@@ -5432,7 +5428,7 @@ static void *s_next(struct seq_file *m, void *p, loff_t *pos)
 
 static void s_stop(struct seq_file *m, void *p)
 {
-	up_read(&slub_lock);
+	mutex_unlock(&slab_mutex);
 }
 
 static int s_show(struct seq_file *m, void *p)

@@ -573,8 +573,8 @@ static void oxygen_card_free(struct snd_card *card)
 	oxygen_shutdown(chip);
 	if (chip->irq >= 0)
 		free_irq(chip->irq, chip);
-	flush_work_sync(&chip->spdif_input_bits_work);
-	flush_work_sync(&chip->gpio_work);
+	flush_work(&chip->spdif_input_bits_work);
+	flush_work(&chip->gpio_work);
 	chip->model.cleanup(chip);
 	kfree(chip->model_data);
 	mutex_destroy(&chip->mutex);
@@ -750,8 +750,8 @@ int oxygen_pci_suspend(struct pci_dev *pci, pm_message_t state)
 	spin_unlock_irq(&chip->reg_lock);
 
 	synchronize_irq(chip->irq);
-	flush_work_sync(&chip->spdif_input_bits_work);
-	flush_work_sync(&chip->gpio_work);
+	flush_work(&chip->spdif_input_bits_work);
+	flush_work(&chip->gpio_work);
 	chip->interrupt_mask = saved_interrupt_mask;
 
 	pci_disable_device(pci);

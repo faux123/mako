@@ -1187,7 +1187,7 @@ static int serial_omap_suspend(struct device *dev)
 
 	if (up) {
 		uart_suspend_port(&serial_omap_reg, &up->port);
-		flush_work_sync(&up->qos_work);
+		flush_work(&up->qos_work);
 	}
 
 	return 0;

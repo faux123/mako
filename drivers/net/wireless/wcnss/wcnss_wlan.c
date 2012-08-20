@@ -378,7 +378,7 @@ wcnss_wlan_ctrl_probe(struct platform_device *pdev)
 
 void wcnss_flush_delayed_boot_votes()
 {
-	flush_delayed_work_sync(&penv->wcnss_work);
+	flush_delayed_work(&penv->wcnss_work);
 }
 EXPORT_SYMBOL(wcnss_flush_delayed_boot_votes);
 

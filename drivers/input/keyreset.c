@@ -91,7 +91,7 @@ static void keyreset_event(struct input_handle *handle, unsigned int type,
 	if (state->key_down == 0 && state->key_up == 0) {
 		state->restart_disabled = 0;
 		if (state->down_time_ms) {
-			__cancel_delayed_work(&state->restart_work);
+			cancel_delayed_work(&state->restart_work);
 			if (state->restart_requested) {
 				pr_info("keyboard reset canceled\n");
 				state->restart_requested = 0;

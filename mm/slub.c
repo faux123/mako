@@ -213,7 +213,6 @@ static inline int sysfs_slab_alias(struct kmem_cache *s, const char *p)
 static inline void sysfs_slab_remove(struct kmem_cache *s)
 {
 	kfree(s->name);
-	kmem_cache_free(kmem_cache, s);
 }
 
 #endif
@@ -5203,7 +5202,6 @@ static void kmem_cache_release(struct kobject *kobj)
 	struct kmem_cache *s = to_slab(kobj);
 
 	kfree(s->name);
-	kmem_cache_free(kmem_cache, s);
 }
 
 static const struct sysfs_ops slab_sysfs_ops = {

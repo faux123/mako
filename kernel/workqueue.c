@@ -1207,7 +1207,7 @@ static bool is_chained_work(struct workqueue_struct *wq)
 }
 
 static void __queue_work(int cpu, struct workqueue_struct *wq,
-			 struct work_struct *work)
+			 struct work_struct *work, bool on_any_cpu)
 {
 	struct pool_workqueue *pwq;
 	struct worker_pool *last_pool;
@@ -1232,8 +1232,13 @@ static void __queue_work(int cpu, struct workqueue_struct *wq,
 retry:
 	/* pwq which will be used unless @work is executing elsewhere */
 	if (!(wq->flags & WQ_UNBOUND)) {
-		if (cpu == WORK_CPU_UNBOUND)
-			cpu = raw_smp_processor_id();
+		if (cpu == WORK_CPU_UNBOUND) {
+			if (on_any_cpu)
+				cpu = sched_select_non_idle_cpu();
+			else
+				cpu = raw_smp_processor_id();
+		}
+
 		pwq = per_cpu_ptr(wq->cpu_pwqs, cpu);
 	} else {
 		pwq = first_pwq(wq);
@@ -1307,6 +1312,22 @@ retry:
 	spin_unlock(&pwq->pool->lock);
 }
 
+static bool __queue_work_on(int cpu, struct workqueue_struct *wq,
+		   struct work_struct *work, bool on_any_cpu)
+{
+	bool ret = false;
+	unsigned long flags;
+
+	local_irq_save(flags);
+
+	if (!test_and_set_bit(WORK_STRUCT_PENDING_BIT, work_data_bits(work))) {
+		__queue_work(cpu, wq, work, on_any_cpu);
+		ret = true;
+	}
+
+	local_irq_restore(flags);
+	return ret;
+}
 /**
  * queue_work_on - queue work on specific cpu
  * @cpu: CPU number to execute work on
@@ -1321,18 +1342,7 @@ retry:
 bool queue_work_on(int cpu, struct workqueue_struct *wq,
 		   struct work_struct *work)
 {
-	bool ret = false;
-	unsigned long flags;
-
-	local_irq_save(flags);
-
-	if (!test_and_set_bit(WORK_STRUCT_PENDING_BIT, work_data_bits(work))) {
-		__queue_work(cpu, wq, work);
-		ret = true;
-	}
-
-	local_irq_restore(flags);
-	return ret;
+	return __queue_work_on(cpu, wq, work, false);
 }
 EXPORT_SYMBOL_GPL(queue_work_on);
 
@@ -1348,21 +1358,38 @@ EXPORT_SYMBOL_GPL(queue_work_on);
  */
 bool queue_work(struct workqueue_struct *wq, struct work_struct *work)
 {
-	return queue_work_on(WORK_CPU_UNBOUND, wq, work);
+	return __queue_work_on(WORK_CPU_UNBOUND, wq, work, false);
 }
 EXPORT_SYMBOL_GPL(queue_work);
+
+/**
+ * queue_work_on_any_cpu - queue work on any cpu on a workqueue
+ * @wq: workqueue to use
+ * @work: work to queue
+ *
+ * Returns %false if @work was already on a queue, %true otherwise.
+ *
+ * We queue the work to any non-idle (from schedulers perspective) cpu.
+ */
+bool queue_work_on_any_cpu(struct workqueue_struct *wq,
+		struct work_struct *work)
+{
+	return __queue_work_on(WORK_CPU_UNBOUND, wq, work, true);
+}
+EXPORT_SYMBOL_GPL(queue_work_on_any_cpu);
 
 void delayed_work_timer_fn(unsigned long __data)
 {
 	struct delayed_work *dwork = (struct delayed_work *)__data;
 
 	/* should have been called from irqsafe timer with irq already off */
-	__queue_work(dwork->cpu, dwork->wq, &dwork->work);
+	__queue_work(dwork->cpu, dwork->wq, &dwork->work, dwork->on_any_cpu);
 }
 EXPORT_SYMBOL(delayed_work_timer_fn);
 
 static void __queue_delayed_work(int cpu, struct workqueue_struct *wq,
-				struct delayed_work *dwork, unsigned long delay)
+				struct delayed_work *dwork, unsigned long delay,
+				bool on_any_cpu)
 {
 	struct timer_list *timer = &dwork->timer;
 	struct work_struct *work = &dwork->work;
@@ -1379,7 +1406,7 @@ static void __queue_delayed_work(int cpu, struct workqueue_struct *wq,
 	 * on that there's no such delay when @delay is 0.
 	 */
 	if (!delay) {
-		__queue_work(cpu, wq, &dwork->work);
+		__queue_work(cpu, wq, &dwork->work, on_any_cpu);
 		return;
 	}
 
@@ -1387,12 +1414,33 @@ static void __queue_delayed_work(int cpu, struct workqueue_struct *wq,
 
 	dwork->wq = wq;
 	dwork->cpu = cpu;
+	dwork->on_any_cpu = on_any_cpu;
 	timer->expires = jiffies + delay;
 
 	if (unlikely(cpu != WORK_CPU_UNBOUND))
 		add_timer_on(timer, cpu);
 	else
 		add_timer(timer);
+}
+
+static bool __queue_delayed_work_on(int cpu, struct workqueue_struct *wq,
+			   struct delayed_work *dwork, unsigned long delay,
+			   bool on_any_cpu)
+{
+	struct work_struct *work = &dwork->work;
+	bool ret = false;
+	unsigned long flags;
+
+	/* read the comment in __queue_work() */
+	local_irq_save(flags);
+
+	if (!test_and_set_bit(WORK_STRUCT_PENDING_BIT, work_data_bits(work))) {
+		__queue_delayed_work(cpu, wq, dwork, delay, on_any_cpu);
+		ret = true;
+	}
+
+	local_irq_restore(flags);
+	return ret;
 }
 
 /**
@@ -1409,20 +1457,7 @@ static void __queue_delayed_work(int cpu, struct workqueue_struct *wq,
 bool queue_delayed_work_on(int cpu, struct workqueue_struct *wq,
 			   struct delayed_work *dwork, unsigned long delay)
 {
-	struct work_struct *work = &dwork->work;
-	bool ret = false;
-	unsigned long flags;
-
-	/* read the comment in __queue_work() */
-	local_irq_save(flags);
-
-	if (!test_and_set_bit(WORK_STRUCT_PENDING_BIT, work_data_bits(work))) {
-		__queue_delayed_work(cpu, wq, dwork, delay);
-		ret = true;
-	}
-
-	local_irq_restore(flags);
-	return ret;
+	return __queue_delayed_work_on(cpu, wq, dwork, delay, false);
 }
 EXPORT_SYMBOL_GPL(queue_delayed_work_on);
 
@@ -1437,9 +1472,48 @@ EXPORT_SYMBOL_GPL(queue_delayed_work_on);
 bool queue_delayed_work(struct workqueue_struct *wq,
 			struct delayed_work *dwork, unsigned long delay)
 {
-	return queue_delayed_work_on(WORK_CPU_UNBOUND, wq, dwork, delay);
+	return __queue_delayed_work_on(WORK_CPU_UNBOUND, wq, dwork, delay,
+			false);
 }
 EXPORT_SYMBOL_GPL(queue_delayed_work);
+
+/**
+ * queue_delayed_work_on_any_cpu - queue work on any non-idle cpu on a workqueue
+ * after delay
+ * @wq: workqueue to use
+ * @dwork: delayable work to queue
+ * @delay: number of jiffies to wait before queueing
+ *
+ * Equivalent to queue_delayed_work() but tries to use any non-idle (from
+ * schedulers perspective) CPU.
+ */
+bool queue_delayed_work_on_any_cpu(struct workqueue_struct *wq,
+			struct delayed_work *dwork, unsigned long delay)
+{
+	return __queue_delayed_work_on(WORK_CPU_UNBOUND, wq, dwork, delay,
+			true);
+}
+EXPORT_SYMBOL_GPL(queue_delayed_work_on_any_cpu);
+
+static bool __mod_delayed_work_on(int cpu, struct workqueue_struct *wq,
+			 struct delayed_work *dwork, unsigned long delay,
+			 bool on_any_cpu)
+{
+	unsigned long flags;
+	int ret;
+
+	do {
+		ret = try_to_grab_pending(&dwork->work, true, &flags);
+	} while (unlikely(ret == -EAGAIN));
+
+	if (likely(ret >= 0)) {
+		__queue_delayed_work(cpu, wq, dwork, delay, on_any_cpu);
+		local_irq_restore(flags);
+	}
+
+	/* -ENOENT from try_to_grab_pending() becomes %true */
+	return ret;
+}
 
 /**
  * mod_delayed_work_on - modify delay of or queue a delayed work on specific CPU
@@ -1462,20 +1536,7 @@ EXPORT_SYMBOL_GPL(queue_delayed_work);
 bool mod_delayed_work_on(int cpu, struct workqueue_struct *wq,
 			 struct delayed_work *dwork, unsigned long delay)
 {
-	unsigned long flags;
-	int ret;
-
-	do {
-		ret = try_to_grab_pending(&dwork->work, true, &flags);
-	} while (unlikely(ret == -EAGAIN));
-
-	if (likely(ret >= 0)) {
-		__queue_delayed_work(cpu, wq, dwork, delay);
-		local_irq_restore(flags);
-	}
-
-	/* -ENOENT from try_to_grab_pending() becomes %true */
-	return ret;
+	return __mod_delayed_work_on(cpu, wq, dwork, delay, false);
 }
 EXPORT_SYMBOL_GPL(mod_delayed_work_on);
 
@@ -1490,7 +1551,8 @@ EXPORT_SYMBOL_GPL(mod_delayed_work_on);
 bool mod_delayed_work(struct workqueue_struct *wq, struct delayed_work *dwork,
 		      unsigned long delay)
 {
-	return mod_delayed_work_on(WORK_CPU_UNBOUND, wq, dwork, delay);
+	return __mod_delayed_work_on(WORK_CPU_UNBOUND, wq, dwork, delay,
+			dwork->on_any_cpu);
 }
 EXPORT_SYMBOL_GPL(mod_delayed_work);
 
@@ -2945,7 +3007,8 @@ bool flush_delayed_work(struct delayed_work *dwork)
 {
 	local_irq_disable();
 	if (del_timer_sync(&dwork->timer))
-		__queue_work(dwork->cpu, dwork->wq, &dwork->work);
+		__queue_work(dwork->cpu, dwork->wq, &dwork->work,
+				dwork->on_any_cpu);
 	local_irq_enable();
 	return flush_work(&dwork->work);
 }

@@ -114,6 +114,7 @@ struct delayed_work {
 	/* target workqueue and CPU ->timer uses to queue ->work */
 	struct workqueue_struct *wq;
 	int cpu;
+	bool on_any_cpu;
 };
 
 /*
@@ -417,10 +418,14 @@ int apply_workqueue_attrs(struct workqueue_struct *wq,
 extern bool queue_work_on(int cpu, struct workqueue_struct *wq,
 			struct work_struct *work);
 extern bool queue_work(struct workqueue_struct *wq, struct work_struct *work);
+extern bool queue_work_on_any_cpu(struct workqueue_struct *wq,
+			struct work_struct *work);
 extern bool queue_delayed_work_on(int cpu, struct workqueue_struct *wq,
 			struct delayed_work *work, unsigned long delay);
 extern bool queue_delayed_work(struct workqueue_struct *wq,
 			struct delayed_work *work, unsigned long delay);
+extern bool queue_delayed_work_on_any_cpu(struct workqueue_struct *wq,
+			struct delayed_work *dwork, unsigned long delay);
 extern bool mod_delayed_work_on(int cpu, struct workqueue_struct *wq,
 			struct delayed_work *dwork, unsigned long delay);
 extern bool mod_delayed_work(struct workqueue_struct *wq,

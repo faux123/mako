@@ -315,6 +315,35 @@ static int __cpuinit msm_cpufreq_init(struct cpufreq_policy *policy)
 	return 0;
 }
 
+
+#ifdef CONFIG_CPU_FREQ_GOV_INTELLIDEMAND
+extern bool lmf_screen_state;
+#endif
+
+static void msm_cpu_early_suspend(struct early_suspend *h)
+{
+
+#ifdef CONFIG_CPU_FREQ_GOV_INTELLIDEMAND
+	lmf_screen_state = false;
+#endif
+
+}
+
+static void msm_cpu_late_resume(struct early_suspend *h)
+{
+
+#ifdef CONFIG_CPU_FREQ_GOV_INTELLIDEMAND
+	lmf_screen_state = true;
+#endif
+
+}
+
+static struct early_suspend msm_cpu_early_suspend_handler = {
+	.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN,
+	.suspend = msm_cpu_early_suspend,
+	.resume = msm_cpu_late_resume,
+};
+
 static int msm_cpufreq_suspend(void)
 {
 	int cpu;
@@ -388,6 +417,7 @@ static int __init msm_cpufreq_register(void)
 #endif
 
 	register_pm_notifier(&msm_cpufreq_pm_notifier);
+	register_early_suspend(&msm_cpu_early_suspend_handler);
 	return cpufreq_register_driver(&msm_cpufreq_driver);
 }
 

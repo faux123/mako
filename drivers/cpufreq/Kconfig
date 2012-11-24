@@ -173,6 +173,13 @@ config CPU_FREQ_GOV_ONDEMAND
 
 	  If in doubt, say N.
 
+config CPUFREQ_ID_PERFLOCK
+	bool "Intellidemand Performance Lock"
+	depends on CPU_FREQ_GOV_INTELLIDEMAND
+	default	y
+	help
+		Minimum CPU performance lock for Intellidemand governor
+
 config CPU_FREQ_GOV_INTERACTIVE
 	tristate "'interactive' cpufreq policy governor"
 	help

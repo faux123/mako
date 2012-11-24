@@ -52,7 +52,7 @@
 #define DEFAULT_FREQ_BOOST_TIME			(2500000)
 #define DEF_SAMPLING_RATE			(50000)
 #define BOOSTED_SAMPLING_RATE			(20000)
-#define DBS_INPUT_EVENT_MIN_FREQ		(1200000)
+#define DBS_INPUT_EVENT_MIN_FREQ		(1060000)
 
 u64 freq_boosted_time;
 /*
@@ -1502,15 +1502,16 @@ static void dbs_refresh_callback(struct work_struct *unused)
 	struct cpu_dbs_info_s *this_dbs_info;
 	unsigned int cpu = smp_processor_id();
 
+	get_online_cpus();
+
 	if (lock_policy_rwsem_write(cpu) < 0)
-		return;
+		goto bail_acq_sema_failed;
 
 	this_dbs_info = &per_cpu(od_cpu_dbs_info, cpu);
 	policy = this_dbs_info->cur_policy;
 	if (!policy) {
 		/* CPU not using intellidemand governor */
-		unlock_policy_rwsem_write(cpu);
-		return;
+		goto bail_incorrect_governor;
 	}
 
 	if (policy->cur < DBS_INPUT_EVENT_MIN_FREQ) {
@@ -1522,7 +1523,12 @@ static void dbs_refresh_callback(struct work_struct *unused)
 		this_dbs_info->prev_cpu_idle = get_cpu_idle_time(cpu,
 				&this_dbs_info->prev_cpu_wall);
 	}
+bail_incorrect_governor:
 	unlock_policy_rwsem_write(cpu);
+
+bail_acq_sema_failed:
+	put_online_cpus();
+	return;
 }
 
 static unsigned int enable_dbs_input_event = 1;
@@ -1551,11 +1557,13 @@ static void dbs_input_event(struct input_handle *handle, unsigned int type,
 	}
 }
 
-#if 0
+#if 1
 static int input_dev_filter(const char *input_dev_name)
 {
-	if (strstr(input_dev_name, "touchscreen") || strstr(input_dev_name, "-keypad") ||
-		strstr(input_dev_name, "-nav") || strstr(input_dev_name, "-oj")) {
+	if (strstr(input_dev_name, "touchscreen") ||
+		strstr(input_dev_name, "-keypad") ||
+		strstr(input_dev_name, "-nav") ||
+		strstr(input_dev_name, "-oj")) {
 		return 0;
 	} else {
 		return 1;
@@ -1569,7 +1577,7 @@ static int dbs_input_connect(struct input_handler *handler,
 	struct input_handle *handle;
 	int error;
 
-#if 0
+#if 1
 	/* filter out those input_dev that we don't care */
 	if (input_dev_filter(dev->name))
 		return -ENODEV;
@@ -1581,7 +1589,7 @@ static int dbs_input_connect(struct input_handler *handler,
 
 	handle->dev = dev;
 	handle->handler = handler;
-	handle->name = "cpufreq";
+	handle->name = "cpufreq_intelli";
 
 	error = input_register_handle(handle);
 	if (error)
@@ -1681,8 +1689,6 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 		if (!cpu)
 			rc = input_register_handler(&dbs_input_handler);
 		mutex_unlock(&dbs_mutex);
-
-		mutex_init(&this_dbs_info->timer_mutex);
 
 		if (!intellidemand_powersave_bias_setspeed(
 					this_dbs_info->cur_policy,
@@ -1785,6 +1791,9 @@ static int __init cpufreq_gov_dbs_init(void)
 		return -EFAULT;
 	}
 	for_each_possible_cpu(i) {
+		struct cpu_dbs_info_s *this_dbs_info =
+			&per_cpu(od_cpu_dbs_info, i);
+		mutex_init(&this_dbs_info->timer_mutex);
 		INIT_WORK(&per_cpu(dbs_refresh_work, i), dbs_refresh_callback);
 	}
 

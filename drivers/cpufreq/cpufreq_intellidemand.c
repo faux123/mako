@@ -54,6 +54,10 @@
 #define BOOSTED_SAMPLING_RATE			(20000)
 #define DBS_INPUT_EVENT_MIN_FREQ		(1060000)
 
+#ifdef CONFIG_CPUFREQ_ID_PERFLOCK
+#define DBS_PERFLOCK_MIN_FREQ			(525000)
+#endif
+
 u64 freq_boosted_time;
 /*
  * The polling frequency of this governor depends on the capability of
@@ -84,6 +88,10 @@ static unsigned long stored_sampling_rate;
 int sampling_rate_boosted;
 u64 sampling_rate_boosted_time;
 unsigned int current_sampling_rate;
+
+#ifdef CONFIG_CPUFREQ_ID_PERFLOCK
+static unsigned int saved_policy_min;
+#endif
 
 static void do_dbs_timer(struct work_struct *work);
 static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
@@ -1188,6 +1196,11 @@ static void do_dbs_timer(struct work_struct *work)
 
 	int delay;
 	unsigned int nr_run_stat;
+#ifdef CONFIG_CPUFREQ_ID_PERFLOCK
+	struct cpufreq_policy *policy;
+
+	policy = dbs_info->cur_policy;
+#endif
 
 	nr_run_stat = calculate_thread_stats();
 	//pr_info("run stats: %u\n", nr_run_stat);
@@ -1199,13 +1212,22 @@ static void do_dbs_timer(struct work_struct *work)
 				if (persist_count > 0)
 					persist_count--;
 
-				if (num_online_cpus() == 2 && persist_count == 0)
+				if (num_online_cpus() == 2 && persist_count == 0) {
 					cpu_down(1);
+#ifdef CONFIG_CPUFREQ_ID_PERFLOCK
+					saved_policy_min = policy->min;
+					policy->min = DBS_PERFLOCK_MIN_FREQ;
+#endif
+				}
 				break;
 			case 2:
 				persist_count = 8;
-				if (num_online_cpus() == 1)
+				if (num_online_cpus() == 1) {
 					cpu_up(1);
+#ifdef CONFIG_CPUFREQ_ID_PERFLOCK
+					policy->min = saved_policy_min;
+#endif
+				}
 				break;
 			default:
 				pr_err("Run Stat Error: Bad value %u\n", nr_run_stat);

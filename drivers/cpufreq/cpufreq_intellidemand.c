@@ -1177,6 +1177,7 @@ static unsigned int calculate_thread_stats (void)
 }
 
 static unsigned int persist_count = 0;
+static unsigned int rq_persist_count = 0;
 
 static void do_dbs_timer(struct work_struct *work)
 {
@@ -1212,9 +1213,18 @@ static void do_dbs_timer(struct work_struct *work)
 		}
 	}
 	if (num_online_cpus() == 2 && rq_info.rq_avg > 38)
+		rq_persist_count++;
+	else
+		if (rq_persist_count > 0)
+			rq_persist_count--;
+
+	if (rq_persist_count > 3) {
 		lmf_browsing_state = false;
+		rq_persist_count = 0;
+	}
 	else
 		lmf_browsing_state = true;
+
 #endif
 
 	//pr_info("Run Queue Average: %u\n", rq_info.rq_avg);

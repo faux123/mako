@@ -31,7 +31,7 @@
 #endif
 #include <linux/rq_stats.h>
 
-#define INTELLIDEMAND_VERSION	3.2
+#define INTELLIDEMAND_VERSION	4.0
 
 /*
  * dbs is used in this file as a shortform for demandbased switching
@@ -44,18 +44,18 @@
 #define BOOSTED_SAMPLING_DOWN_FACTOR		(10)
 #define MAX_SAMPLING_DOWN_FACTOR		(100000)
 #define MICRO_FREQUENCY_DOWN_DIFFERENTIAL	(3)
-#define MICRO_FREQUENCY_UP_THRESHOLD		(95)
+#define MICRO_FREQUENCY_UP_THRESHOLD		(75)
 #define MICRO_FREQUENCY_MIN_SAMPLE_RATE		(15000)
 #define MIN_FREQUENCY_UP_THRESHOLD		(11)
 #define MAX_FREQUENCY_UP_THRESHOLD		(100)
 #define MIN_FREQUENCY_DOWN_DIFFERENTIAL		(1)
-#define DEFAULT_FREQ_BOOST_TIME			(2500000)
+#define DEFAULT_FREQ_BOOST_TIME			(1500000)
 #define DEF_SAMPLING_RATE			(50000)
-#define BOOSTED_SAMPLING_RATE			(20000)
-#define DBS_INPUT_EVENT_MIN_FREQ		(1060000)
+#define BOOSTED_SAMPLING_RATE			(15000)
+#define DBS_INPUT_EVENT_MIN_FREQ		(1026000)
 
 #ifdef CONFIG_CPUFREQ_ID_PERFLOCK
-#define DBS_PERFLOCK_MIN_FREQ			(525000)
+#define DBS_PERFLOCK_MIN_FREQ			(648000)
 #endif
 
 u64 freq_boosted_time;
@@ -1068,14 +1068,16 @@ enum {
 
 enum {	
 	BOOT_CPU = 0,	
-	NON_BOOT_CPU
+	NON_BOOT_CPU1,
+	NON_BOOT_CPU2,
+	NON_BOOT_CPU3,
 };
 
 #define SAMPLE_DURATION_MSEC	(10*1000) // 10 secs >= 10000 msec
 #define ACTIVE_DURATION_MSEC	(3*60*1000) // 3 mins
 #define INACTIVE_DURATION_MSEC	(1*60*1000) // 1 mins
-#define MAX_ACTIVE_FREQ_LIMIT	35 // %
-#define MAX_INACTIVE_FREQ_LIMIT	25 // %
+#define MAX_ACTIVE_FREQ_LIMIT	30 // %
+#define MAX_INACTIVE_FREQ_LIMIT	20 // %
 #define ACTIVE_MAX_FREQ		CONFIG_INTELLI_MAX_ACTIVE_FREQ		// 1.512GHZ
 #define INACTIVE_MAX_FREQ	CONFIG_INTELLI_MAX_INACTIVE_FREQ	// 1.134GHZ
 
@@ -1158,13 +1160,13 @@ unsigned long get_lmf_inactive_load(void)
 }
 #endif
 
-#define NR_FSHIFT	1
+#define NR_FSHIFT	3
 static unsigned int nr_run_thresholds[] = {
-/* 	1,  2 - on-line cpus target */
-	4,  UINT_MAX /* avg run threads * 2 (e.g., 9 = 2.25 threads) */
+/* 	1,  2,  3,  4 - on-line cpus target */
+	5,  7,  9,  UINT_MAX /* avg run threads * 2 (e.g., 9 = 2.25 threads) */
 	};
 
-static unsigned int nr_run_hysteresis = 2;  /* 0.5 thread */
+static unsigned int nr_run_hysteresis = 4;  /* 0.5 thread */
 static unsigned int nr_run_last;
 
 static unsigned int calculate_thread_stats (void)
@@ -1212,8 +1214,10 @@ static void do_dbs_timer(struct work_struct *work)
 				if (persist_count > 0)
 					persist_count--;
 
-				if (num_online_cpus() == 2 && persist_count == 0) {
+				if (num_online_cpus() >= 2 && persist_count == 0) {
 					cpu_down(1);
+					cpu_down(2);
+					cpu_down(3);
 #ifdef CONFIG_CPUFREQ_ID_PERFLOCK
 					saved_policy_min = policy->min;
 					policy->min = DBS_PERFLOCK_MIN_FREQ;
@@ -1221,9 +1225,27 @@ static void do_dbs_timer(struct work_struct *work)
 				}
 				break;
 			case 2:
-				persist_count = 8;
+				persist_count = 19;
 				if (num_online_cpus() == 1) {
 					cpu_up(1);
+#ifdef CONFIG_CPUFREQ_ID_PERFLOCK
+					policy->min = saved_policy_min;
+#endif
+				}
+				break;
+			case 3:
+				persist_count = 15;
+				if (num_online_cpus() == 2) {
+					cpu_up(2);
+#ifdef CONFIG_CPUFREQ_ID_PERFLOCK
+					policy->min = saved_policy_min;
+#endif
+				}
+				break;
+			case 4:
+				persist_count = 11;
+				if (num_online_cpus() == 3) {
+					cpu_up(3);
 #ifdef CONFIG_CPUFREQ_ID_PERFLOCK
 					policy->min = saved_policy_min;
 #endif
@@ -1234,7 +1256,7 @@ static void do_dbs_timer(struct work_struct *work)
 				break;
 		}
 	}
-	if (num_online_cpus() == 2 && rq_info.rq_avg > 38)
+	if (num_online_cpus() >= 2 && rq_info.rq_avg > 38)
 		rq_persist_count++;
 	else
 		if (rq_persist_count > 0)
@@ -1274,11 +1296,18 @@ static void do_dbs_timer(struct work_struct *work)
 				pr_info("LMF: CPU0 set max freq to: %lu\n", lmf_active_max_limit);
 				cpufreq_set_limits(BOOT_CPU, SET_MAX, lmf_active_max_limit);
 				
-				pr_info("LMF: CPU1 set max freq to: %lu\n", lmf_active_max_limit);
-				if (cpu_online(NON_BOOT_CPU))
-					cpufreq_set_limits(NON_BOOT_CPU, SET_MAX, lmf_active_max_limit);
-				else
-					cpufreq_set_limits_off(NON_BOOT_CPU, SET_MAX, lmf_active_max_limit);
+				pr_info("LMF: CPUX set max freq to: %lu\n", lmf_active_max_limit);
+				if (cpu_online(NON_BOOT_CPU1) ||
+					cpu_online(NON_BOOT_CPU2) ||
+					cpu_online(NON_BOOT_CPU3)) {
+					cpufreq_set_limits(NON_BOOT_CPU1, SET_MAX, lmf_active_max_limit);
+					cpufreq_set_limits(NON_BOOT_CPU2, SET_MAX, lmf_active_max_limit);
+					cpufreq_set_limits(NON_BOOT_CPU3, SET_MAX, lmf_active_max_limit);
+				} else {
+					cpufreq_set_limits_off(NON_BOOT_CPU1, SET_MAX, lmf_active_max_limit);
+					cpufreq_set_limits_off(NON_BOOT_CPU2, SET_MAX, lmf_active_max_limit);
+					cpufreq_set_limits_off(NON_BOOT_CPU3, SET_MAX, lmf_active_max_limit);
+				}
 			}
 			
 			jiffies_old = 0;
@@ -1299,7 +1328,7 @@ static void do_dbs_timer(struct work_struct *work)
 		unsigned long load_total  = 0;
 		unsigned long jiffies_cur = jiffies;
 
-		if (cpu == NON_BOOT_CPU)
+		if (cpu == NON_BOOT_CPU1 || cpu == NON_BOOT_CPU2 || cpu == NON_BOOT_CPU3)
 		{
 			delay_msec = (dbs_tuners_ins.sampling_rate * dbs_info->rate_mult) / 1000;
 			policy = dbs_info->cur_policy;
@@ -1389,10 +1418,17 @@ static void do_dbs_timer(struct work_struct *work)
 								cpufreq_set_limits(BOOT_CPU, SET_MAX, lmf_inactive_max_limit);
 								
 								pr_info("LMF: CPU1 set max freq to: %lu\n", lmf_inactive_max_limit);
-								if (cpu_online(NON_BOOT_CPU))
-									cpufreq_set_limits(NON_BOOT_CPU, SET_MAX, lmf_inactive_max_limit);
-								else
-									cpufreq_set_limits_off(NON_BOOT_CPU, SET_MAX, lmf_inactive_max_limit);
+								if (cpu_online(NON_BOOT_CPU1) ||
+									cpu_online(NON_BOOT_CPU2) ||
+									cpu_online(NON_BOOT_CPU3)) {
+									cpufreq_set_limits(NON_BOOT_CPU1, SET_MAX, lmf_inactive_max_limit);
+									cpufreq_set_limits(NON_BOOT_CPU2, SET_MAX, lmf_inactive_max_limit);
+									cpufreq_set_limits(NON_BOOT_CPU3, SET_MAX, lmf_inactive_max_limit);
+								} else {
+									cpufreq_set_limits_off(NON_BOOT_CPU1, SET_MAX, lmf_inactive_max_limit);
+									cpufreq_set_limits_off(NON_BOOT_CPU2, SET_MAX, lmf_inactive_max_limit);
+									cpufreq_set_limits_off(NON_BOOT_CPU3, SET_MAX, lmf_inactive_max_limit);
+								}
 							}
 							else
 							{
@@ -1435,10 +1471,17 @@ static void do_dbs_timer(struct work_struct *work)
 								cpufreq_set_limits(BOOT_CPU, SET_MAX, lmf_active_max_limit);
 								
 								pr_info("LMF: CPU1 set max freq to: %lu\n", lmf_active_max_limit);
-								if (cpu_online(NON_BOOT_CPU))
-									cpufreq_set_limits(NON_BOOT_CPU, SET_MAX, lmf_active_max_limit);
-								else
-									cpufreq_set_limits_off(NON_BOOT_CPU, SET_MAX, lmf_active_max_limit);
+								if (cpu_online(NON_BOOT_CPU1) ||
+									cpu_online(NON_BOOT_CPU2) ||
+									cpu_online(NON_BOOT_CPU3)) {
+									cpufreq_set_limits(NON_BOOT_CPU1, SET_MAX, lmf_inactive_max_limit);
+									cpufreq_set_limits(NON_BOOT_CPU2, SET_MAX, lmf_inactive_max_limit);
+									cpufreq_set_limits(NON_BOOT_CPU3, SET_MAX, lmf_inactive_max_limit);
+								} else {
+									cpufreq_set_limits_off(NON_BOOT_CPU1, SET_MAX, lmf_active_max_limit);
+									cpufreq_set_limits_off(NON_BOOT_CPU2, SET_MAX, lmf_inactive_max_limit);
+									cpufreq_set_limits_off(NON_BOOT_CPU3, SET_MAX, lmf_inactive_max_limit);
+								}
 
 							}
 							else

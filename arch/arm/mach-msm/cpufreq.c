@@ -292,6 +292,15 @@ static void msm_cpu_early_suspend(struct early_suspend *h)
 
 		mutex_lock(&per_cpu(cpufreq_suspend, cpu).suspend_mutex);
 		lmf_screen_state = false;
+		// put rest of the cores to sleep!
+		switch (num_online_cpus()) {
+		case 4:
+			cpu_down(3);
+		case 3:
+			cpu_down(2);
+		case 2:
+			cpu_down(1);
+		}
 		mutex_unlock(&per_cpu(cpufreq_suspend, cpu).suspend_mutex);
 	}
 #endif

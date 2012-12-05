@@ -623,7 +623,7 @@ static int msm_hsic_reset(struct msm_hsic_hcd *mehci)
 	return 0;
 }
 
-#define PHY_SUSPEND_TIMEOUT_USEC	(500 * 1000)
+#define PHY_SUSPEND_TIMEOUT_USEC	(120 * 1000)
 #define PHY_RESUME_TIMEOUT_USEC		(100 * 1000)
 
 #ifdef CONFIG_PM_SLEEP

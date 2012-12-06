@@ -126,4 +126,7 @@ static void msm_cpufreq_limit_exit(void)
 
 module_init(msm_cpufreq_limit_init);
 module_exit(msm_cpufreq_limit_exit);
+MODULE_LICENSE("GPL v2"); 
+MODULE_AUTHOR("Paul Reioux <reioux@gmail.com>");
+MODULE_DESCRIPTION("Krait CPU frequency Limit Driver");
 

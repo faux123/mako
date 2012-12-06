@@ -62,10 +62,10 @@ static ssize_t msm_cpufreq_limit_store(struct kobject *kobj, struct kobj_attribu
 
 	if(sscanf(buf, "%u\n", &data) == 1) {
 		for_each_possible_cpu(cpu) {
-			ret = update_cpu_max_freq(cpu, max_freq);
+			ret = update_cpu_max_freq(cpu, data);
 			if (ret)
 				pr_debug("Unable to limit cpu%d max freq to %d\n",
-						cpu, max_freq);
+						cpu, data);
 		}
 		if (!ret)
 			limited_max_freq = data;

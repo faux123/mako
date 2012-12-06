@@ -31,7 +31,7 @@
 #endif
 #include <linux/rq_stats.h>
 
-#define INTELLIDEMAND_VERSION	4.0
+#define INTELLIDEMAND_VERSION	4.1
 
 /*
  * dbs is used in this file as a shortform for demandbased switching
@@ -92,6 +92,8 @@ unsigned int current_sampling_rate;
 #ifdef CONFIG_CPUFREQ_ID_PERFLOCK
 static unsigned int saved_policy_min;
 #endif
+
+static unsigned int eco_mode_active = 0;
 
 static void do_dbs_timer(struct work_struct *work);
 static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
@@ -373,6 +375,26 @@ static ssize_t show_lmf_inactive_load(struct kobject *kobj,
 	return sprintf(buf, "%ld\n", get_lmf_inactive_load());
 }
 #endif
+
+static ssize_t show_eco_mode(struct kobject *kobj,
+                                      struct attribute *attr, char *buf)
+{
+        return sprintf(buf, "%u\n", eco_mode_active);
+}
+
+static ssize_t store_eco_mode(struct kobject *kobj, struct attribute *attr,
+                                const char *buf, size_t count)
+{
+	unsigned int input;
+	int ret;
+
+	ret = sscanf(buf, "%u", &input);
+	if (ret != 1)
+		return -EINVAL;
+
+	eco_mode_active = input;
+	return count;
+}
 
 static ssize_t show_powersave_bias
 (struct kobject *kobj, struct attribute *attr, char *buf)
@@ -813,6 +835,7 @@ define_one_global_rw(boostpulse);
 define_one_global_rw(boosttime);
 define_one_global_rw(boostfreq);
 define_one_global_rw(two_phase_freq);
+define_one_global_rw(eco_mode);
 
 #ifdef CONFIG_CPUFREQ_LIMIT_MAX_FREQ
 define_one_global_rw(lmf_browser);
@@ -842,6 +865,7 @@ static struct attribute *dbs_attributes[] = {
 	&lmf_active_load.attr,
 	&lmf_inactive_load.attr,
 #endif
+	&eco_mode.attr,
 	NULL
 };
 
@@ -1161,24 +1185,49 @@ unsigned long get_lmf_inactive_load(void)
 #endif
 
 #define NR_FSHIFT	3
-static unsigned int nr_run_thresholds[] = {
+static unsigned int nr_fshift = NR_FSHIFT;
+static unsigned int nr_run_thresholds_full[] = {
 /* 	1,  2,  3,  4 - on-line cpus target */
 	7,  9, 11,  UINT_MAX /* avg run threads * 2 (e.g., 9 = 2.25 threads) */
 	};
 
+static unsigned int nr_run_thresholds_eco[] = {
+/*      1,  2, - on-line cpus target */
+        5,  UINT_MAX /* avg run threads * 2 (e.g., 9 = 2.25 threads) */
+        };
+
 static unsigned int nr_run_hysteresis = 4;  /* 0.5 thread */
 static unsigned int nr_run_last;
 
-static unsigned int calculate_thread_stats (void)
+static unsigned int calculate_thread_stats(void)
 {
 	unsigned int avg_nr_run = avg_nr_running();
 	unsigned int nr_run;
+	unsigned int threshold_size;
 
-	for (nr_run = 1; nr_run < ARRAY_SIZE(nr_run_thresholds); nr_run++) {
-		unsigned int nr_threshold = nr_run_thresholds[nr_run - 1];
+	if (!eco_mode_active) {
+		threshold_size =  ARRAY_SIZE(nr_run_thresholds_full);
+		nr_run_hysteresis = 4;
+		nr_fshift = 3;
+		//pr_info("intelldemand: full mode active!");
+	}
+	else {
+		threshold_size =  ARRAY_SIZE(nr_run_thresholds_eco);
+		nr_run_hysteresis = 2;
+		nr_fshift = 1;
+		//pr_info("intelldemand: eco mode active!");
+	}
+
+	for (nr_run = 1; nr_run < threshold_size; nr_run++) {
+		unsigned int nr_threshold;
+		if (!eco_mode_active)
+			nr_threshold = nr_run_thresholds_full[nr_run - 1];
+		else
+			nr_threshold = nr_run_thresholds_eco[nr_run - 1];
+
 		if (nr_run_last <= nr_run)
 			nr_threshold += nr_run_hysteresis;
-		if (avg_nr_run <= (nr_threshold << (FSHIFT - NR_FSHIFT)))
+		if (avg_nr_run <= (nr_threshold << (FSHIFT - nr_fshift)))
 			break;
 	}
 	nr_run_last = nr_run;
@@ -1221,6 +1270,10 @@ static void do_dbs_timer(struct work_struct *work)
 					policy->min = DBS_PERFLOCK_MIN_FREQ;
 #endif
 				}
+				if (eco_mode_active) {
+					cpu_down(3);
+					cpu_down(2);
+				}
 				break;
 			case 2:
 				persist_count = 19;
@@ -1230,8 +1283,8 @@ static void do_dbs_timer(struct work_struct *work)
 					policy->min = saved_policy_min;
 #endif
 				} else {
-					cpu_down(2);
 					cpu_down(3);
+					cpu_down(2);
 				}
 				break;
 			case 3:

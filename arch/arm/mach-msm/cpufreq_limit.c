@@ -56,7 +56,6 @@ static ssize_t msm_cpufreq_limit_store(struct kobject *kobj, struct kobj_attribu
 {
 	int cpu = 0;
 	int ret = 0;
-	uint32_t max_freq = limited_max_freq;
 
 	unsigned int data;
 

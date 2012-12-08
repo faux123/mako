@@ -1188,12 +1188,12 @@ unsigned long get_lmf_inactive_load(void)
 static unsigned int nr_fshift = NR_FSHIFT;
 static unsigned int nr_run_thresholds_full[] = {
 /* 	1,  2,  3,  4 - on-line cpus target */
-	7,  9, 11,  UINT_MAX /* avg run threads * 2 (e.g., 9 = 2.25 threads) */
+	5,  7,  9,  UINT_MAX /* avg run threads * 2 (e.g., 9 = 2.25 threads) */
 	};
 
 static unsigned int nr_run_thresholds_eco[] = {
 /*      1,  2, - on-line cpus target */
-        5,  UINT_MAX /* avg run threads * 2 (e.g., 9 = 2.25 threads) */
+        3,  UINT_MAX /* avg run threads * 2 (e.g., 9 = 2.25 threads) */
         };
 
 static unsigned int nr_run_hysteresis = 4;  /* 0.5 thread */
@@ -1276,7 +1276,7 @@ static void do_dbs_timer(struct work_struct *work)
 				}
 				break;
 			case 2:
-				persist_count = 19;
+				persist_count = 27;
 				if (num_online_cpus() == 1) {
 					cpu_up(1);
 #ifdef CONFIG_CPUFREQ_ID_PERFLOCK
@@ -1288,7 +1288,7 @@ static void do_dbs_timer(struct work_struct *work)
 				}
 				break;
 			case 3:
-				persist_count = 15;
+				persist_count = 21;
 				if (num_online_cpus() == 2) {
 					cpu_up(2);
 #ifdef CONFIG_CPUFREQ_ID_PERFLOCK
@@ -1299,7 +1299,7 @@ static void do_dbs_timer(struct work_struct *work)
 				}
 				break;
 			case 4:
-				persist_count = 11;
+				persist_count = 15;
 				if (num_online_cpus() == 3) {
 					cpu_up(3);
 #ifdef CONFIG_CPUFREQ_ID_PERFLOCK

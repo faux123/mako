@@ -229,6 +229,19 @@ struct syscore_ops panel_syscore_ops = {
 	.shutdown = mipi_lgit_lcd_shutdown,
 };
 
+static bool calc_checksum(int intArr[]) {
+	int i = 0;
+	unsigned char chksum = 0;
+
+	for (i=i;i<10;i++)
+		chksum += intArr[i];
+
+	if (chksum == (unsigned char)intArr[0])
+		return true;
+	else
+		return false;
+}
+
 /******************* begin sysfs interface *******************/
 
 static ssize_t kgamma_r_store(struct device *dev, struct device_attribute *attr,
@@ -242,18 +255,19 @@ static ssize_t kgamma_r_store(struct device *dev, struct device_attribute *attr,
 		&kgamma[4], &kgamma[5], &kgamma[6], &kgamma[7],
 		&kgamma[8], &kgamma[9]);
 
-	kgamma[0] = 0xd0;
-	for (i=0; i<10; i++) {
-		pr_info("kgamma_r_p [%d] => %d \n", i, kgamma[i]);
-		faux123_power_on_set_1[5].payload[i] = kgamma[i];
-	}
+	if (calc_checksum(kgamma)) {
+		kgamma[0] = 0xd0;
+		for (i=0; i<10; i++) {
+			//pr_info("kgamma_r_p [%d] => %d \n", i, kgamma[i]);
+			faux123_power_on_set_1[5].payload[i] = kgamma[i];
+		}
 
-	kgamma[0] = 0xd1;
-	for (i=0; i<10; i++) {
-		pr_info("kgamma_r_n [%d] => %d \n", i, kgamma[i]);
-		faux123_power_on_set_1[6].payload[i] = kgamma[i];
+		kgamma[0] = 0xd1;
+		for (i=0; i<10; i++) {
+			//pr_info("kgamma_r_n [%d] => %d \n", i, kgamma[i]);
+			faux123_power_on_set_1[6].payload[i] = kgamma[i];
+		}
 	}
-
 	return count;
 }
 
@@ -283,18 +297,19 @@ static ssize_t kgamma_g_store(struct device *dev, struct device_attribute *attr,
 		&kgamma[4], &kgamma[5], &kgamma[6], &kgamma[7],
 		&kgamma[8], &kgamma[9]);
 
-	kgamma[0] = 0xd2;
-	for (i=0; i<10; i++) {
-		pr_info("kgamma_g_p [%d] => %d \n", i, kgamma[i]);
-		faux123_power_on_set_1[7].payload[i] = kgamma[i];
-	}
+	if (calc_checksum(kgamma)) {
+		kgamma[0] = 0xd2;
+		for (i=0; i<10; i++) {
+			//pr_info("kgamma_g_p [%d] => %d \n", i, kgamma[i]);
+			faux123_power_on_set_1[7].payload[i] = kgamma[i];
+		}
 
-	kgamma[0] = 0xd3;
-	for (i=0; i<10; i++) {
-		pr_info("kgamma_g_n [%d] => %d \n", i, kgamma[i]);
-		faux123_power_on_set_1[8].payload[i] = kgamma[i];
+		kgamma[0] = 0xd3;
+		for (i=0; i<10; i++) {
+			//pr_info("kgamma_g_n [%d] => %d \n", i, kgamma[i]);
+			faux123_power_on_set_1[8].payload[i] = kgamma[i];
+		}
 	}
-
 	return count;
 }
 
@@ -324,18 +339,19 @@ static ssize_t kgamma_b_store(struct device *dev, struct device_attribute *attr,
 		&kgamma[4], &kgamma[5], &kgamma[6], &kgamma[7],
 		&kgamma[8], &kgamma[9]);
 
-	kgamma[0] = 0xd4;
-	for (i=0; i<10; i++) {
-		pr_info("kgamma_b_p [%d] => %d \n", i, kgamma[i]);
-		faux123_power_on_set_1[9].payload[i] = kgamma[i];
-	}
+	if (calc_checksum(kgamma)) {
+		kgamma[0] = 0xd4;
+		for (i=0; i<10; i++) {
+			//pr_info("kgamma_b_p [%d] => %d \n", i, kgamma[i]);
+			faux123_power_on_set_1[9].payload[i] = kgamma[i];
+		}
 
-	kgamma[0] = 0xd5;
-	for (i=0; i<10; i++) {
-		pr_info("kgamma_b_n [%d] => %d \n", i, kgamma[i]);
-		faux123_power_on_set_1[10].payload[i] = kgamma[i];
+		kgamma[0] = 0xd5;
+		for (i=0; i<10; i++) {
+			//pr_info("kgamma_b_n [%d] => %d \n", i, kgamma[i]);
+			faux123_power_on_set_1[10].payload[i] = kgamma[i];
+		}
 	}
-
 	return count;
 }
 

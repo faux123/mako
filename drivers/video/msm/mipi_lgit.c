@@ -233,13 +233,15 @@ static bool calc_checksum(int intArr[]) {
 	int i = 0;
 	unsigned char chksum = 0;
 
-	for (i=i;i<10;i++)
+	for (i=1; i<10; i++)
 		chksum += intArr[i];
 
-	if (chksum == (unsigned char)intArr[0])
+	if (chksum == (unsigned char)intArr[0]) {
 		return true;
-	else
+	} else {
+		//pr_info("expecting %d, got this %d instead!", chksum, intArr[0]);
 		return false;
+	}
 }
 
 /******************* begin sysfs interface *******************/

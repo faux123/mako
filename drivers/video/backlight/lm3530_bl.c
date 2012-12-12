@@ -125,11 +125,19 @@ static void lm3530_set_main_current_level(struct i2c_client *client, int level)
 
 	mdelay(1);
 }
+/* motley - keep color alive after screen off/on */
+#ifdef CONFIG_LCD_KCAL
+extern int kcal_keep_color_alive(void);
+#endif
 
 static bool first_boot = true;
 static void lm3530_backlight_on(struct i2c_client *client, int level)
 {
 	struct lm3530_device *dev = i2c_get_clientdata(client);
+/* motley - keep color alive after screen off/on */
+#ifdef CONFIG_LCD_KCAL
+	int ret;
+#endif
 
 	mutex_lock(&backlight_mtx);
 	if (backlight_status == BL_OFF) {
@@ -148,6 +156,12 @@ static void lm3530_backlight_on(struct i2c_client *client, int level)
 	lm3530_set_main_current_level(dev->client, level);
 	backlight_status = BL_ON;
 	mutex_unlock(&backlight_mtx);
+	
+/* motley - keep color alive after screen off/on */
+#ifdef CONFIG_LCD_KCAL	
+	ret=kcal_keep_color_alive();
+	pr_debug("%s resetting preferred RGB value, return code:%d\n", __func__, ret);
+#endif
 }
 
 static void lm3530_backlight_off(struct i2c_client *client)

@@ -100,4 +100,29 @@ void get_slabinfo(struct kmem_cache *s, struct slabinfo *sinfo);
 void slabinfo_show_stats(struct seq_file *m, struct kmem_cache *s);
 ssize_t slabinfo_write(struct file *file, const char __user *buffer,
 		       size_t count, loff_t *ppos);
+
+static inline bool slab_equal_or_root(struct kmem_cache *s,
+				      struct kmem_cache *p)
+{
+	return true;
+}
+
+static inline struct kmem_cache *cache_from_obj(struct kmem_cache *s, void *x)
+{
+	struct kmem_cache *cachep;
+	struct page *page;
+
+	if (!unlikely(s->flags & SLAB_DEBUG_FREE))
+		return s;
+
+	page = virt_to_head_page(x);
+	cachep = page->slab_cache;
+	if (slab_equal_or_root(cachep, s))
+		return cachep;
+
+	pr_err("%s: Wrong slab cache. %s but object is from %s\n",
+		__FUNCTION__, cachep->name, s->name);
+	WARN_ON_ONCE(1);
+	return s;
+}
 #endif

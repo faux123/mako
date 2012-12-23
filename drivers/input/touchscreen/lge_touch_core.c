@@ -288,7 +288,14 @@ static void release_all_ts_event(struct lge_touch_data *ts)
 				ts->ts_data.curr_data[id].tool_type, 0);
 		ts->ts_data.curr_data[id].state = 0;
 	}
-
+#ifdef CONFIG_TOUCHSCREEN_SWEEP2WAKE
+        if (s2w_switch > 0) {
+                exec_count = true;
+                barrier[0] = false;
+                barrier[1] = false;
+                scr_on_touch = false;
+        }
+#endif
 	input_sync(ts->input_dev);
 }
 
@@ -2075,8 +2082,10 @@ static void touch_early_suspend(struct early_suspend *h)
 	        touch_power_cntl(ts, ts->pdata->role->suspend_pwr);
         }
 #ifdef CONFIG_TOUCHSCREEN_SWEEP2WAKE
-        else if (s2w_switch > 0)
+        else if (s2w_switch > 0) {
                 enable_irq_wake(ts->client->irq);
+                release_all_ts_event(ts);
+        }
 #endif
 }
 

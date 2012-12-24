@@ -4366,8 +4366,22 @@ tANI_BOOLEAN csrRoamIsCCXAssoc(tpAniSirGlobal pMac)
 #endif
 #ifdef FEATURE_WLAN_LFR
 //Returns whether "Legacy Fast Roaming" is currently enabled...or not
-tANI_BOOLEAN csrRoamIsFastRoamEnabled(tpAniSirGlobal pMac)
+tANI_BOOLEAN csrRoamIsFastRoamEnabled(tpAniSirGlobal pMac, tANI_U32 sessionId)
 {
+    tCsrRoamSession *pSession = NULL;
+
+    if (CSR_IS_SESSION_VALID( pMac, sessionId ) )
+    {
+        pSession = CSR_GET_SESSION( pMac, sessionId );
+        if (NULL != pSession->pCurRoamProfile)
+        {
+            if (pSession->pCurRoamProfile->csrPersona != VOS_STA_MODE)
+            {
+                return eANI_BOOLEAN_FALSE;
+            }
+        }
+    }
+
     return (pMac->roam.configParam.isFastRoamIniFeatureEnabled &&
             (!csrIsConcurrentSessionRunning(pMac)));
 }
@@ -6715,7 +6729,7 @@ static void csrRoamingStateConfigCnfProcessor( tpAniSirGlobal pMac, tANI_U32 res
 #endif
 #ifdef FEATURE_WLAN_LFR
                         if (csrRoamIsHandoffInProgress(pMac) && 
-                                                csrRoamIsFastRoamEnabled(pMac))
+                                                csrRoamIsFastRoamEnabled(pMac, sessionId))
                         {
                             // Now serialize the reassoc command.
                             status = csrRoamIssueReassociateCmd(pMac, sessionId);
@@ -8087,7 +8101,7 @@ void csrRoamCheckForLinkStatusChange( tpAniSirGlobal pMac, tSirSmeRsp *pSirMsg )
                 }
 #endif
 #ifdef FEATURE_WLAN_LFR
-                if (csrRoamIsFastRoamEnabled(pMac) && (csrNeighborRoamStatePreauthDone(pMac)))
+                if (csrRoamIsFastRoamEnabled(pMac, sessionId) && (csrNeighborRoamStatePreauthDone(pMac)))
                 {
                     csrNeighborRoamTranistionPreauthDoneToDisconnected(pMac);
                 }
@@ -8151,7 +8165,7 @@ void csrRoamCheckForLinkStatusChange( tpAniSirGlobal pMac, tSirSmeRsp *pSirMsg )
                 }
 #endif
 #ifdef FEATURE_WLAN_LFR
-                if (csrRoamIsFastRoamEnabled(pMac) && (csrNeighborRoamStatePreauthDone(pMac)))
+                if (csrRoamIsFastRoamEnabled(pMac, sessionId) && (csrNeighborRoamStatePreauthDone(pMac)))
                 {
                     csrNeighborRoamTranistionPreauthDoneToDisconnected(pMac);
                 }
@@ -11258,7 +11272,7 @@ eHalStatus csrSendJoinReqMsg( tpAniSirGlobal pMac, tANI_U32 sessionId, tSirBssDe
         // Fill in isFastTransitionEnabled
         if (pMac->roam.configParam.isFastTransitionEnabled
 #ifdef FEATURE_WLAN_LFR
-        || csrRoamIsFastRoamEnabled(pMac)
+        || csrRoamIsFastRoamEnabled(pMac, sessionId)
 #endif
         )
         {
@@ -11274,7 +11288,7 @@ eHalStatus csrSendJoinReqMsg( tpAniSirGlobal pMac, tANI_U32 sessionId, tSirBssDe
         }
 #endif
 #ifdef FEATURE_WLAN_LFR
-        if(csrRoamIsFastRoamEnabled(pMac))
+        if(csrRoamIsFastRoamEnabled(pMac, sessionId))
         {
             //legacy fast roaming enabled
             dwTmp = pal_cpu_to_be32(TRUE); 
@@ -11675,7 +11689,7 @@ eHalStatus csrSendSmeReassocReqMsg( tpAniSirGlobal pMac, tANI_U32 sessionId, tSi
         // Fill in isFastTransitionEnabled
         if (pMac->roam.configParam.isFastTransitionEnabled
 #ifdef FEATURE_WLAN_LFR
-         || csrRoamIsFastRoamEnabled(pMac)
+         || csrRoamIsFastRoamEnabled(pMac, sessionId)
 #endif
          )
         {
@@ -11691,7 +11705,7 @@ eHalStatus csrSendSmeReassocReqMsg( tpAniSirGlobal pMac, tANI_U32 sessionId, tSi
         }
 #endif
 #ifdef FEATURE_WLAN_LFR
-        if(csrRoamIsFastRoamEnabled(pMac))
+        if(csrRoamIsFastRoamEnabled(pMac, sessionId))
         {
             //legacy fast roaming enabled
             dwTmp = pal_cpu_to_be32(TRUE); 
@@ -14741,7 +14755,7 @@ void csrRoamFTPreAuthRspProcessor( tHalHandle hHal, tpSirFTPreAuthRsp pFTPreAuth
 #ifdef FEATURE_WLAN_LFR
     // If Legacy Fast Roaming is enabled, signal the supplicant  
     // So he can send us a PMK-ID for this candidate AP.
-    if (csrRoamIsFastRoamEnabled(pMac))
+    if (csrRoamIsFastRoamEnabled(pMac, CSR_SESSION_ID_INVALID))
     {
         // Save the bssid from the received response 
         palCopyMemory(pMac->hHdd, (void *)&roamInfo.bssid, (void *)pFTPreAuthRsp->preAuthbssId, sizeof(tCsrBssid));

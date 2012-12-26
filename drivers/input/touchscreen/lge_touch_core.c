@@ -1767,18 +1767,30 @@ static ssize_t lge_touch_sweep2wake_show(struct device *dev,
 	return count;
 }
 
-static ssize_t lge_touch_sweep2wake_dump(struct device *dev,
+static ssize_t lge_touch_sweep2wake_store(struct device *dev,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
-	if (buf[0] >= '0' && buf[0] <= '2' && buf[1] == '\n')
-                if (s2w_switch != buf[0] - '0')
-		        s2w_switch = buf[0] - '0';
+	unsigned int data;
+
+	if(sscanf(buf, "%u\n", &data) == 1) {
+		if (data == 1) {
+			pr_info("%s: enabled\n", __FUNCTION__);
+			s2w_switch = data;
+		}
+		else if (data == 0) {
+			pr_info("%s: disabled\n", __FUNCTION__);
+			s2w_switch = data;
+		}
+		else
+			pr_info("%s: bad value: %u\n", __FUNCTION__, data);
+	} else
+		pr_info("%s: unknown input!\n", __FUNCTION__);
 
 	return count;
 }
 
 static DEVICE_ATTR(sweep2wake, (S_IWUSR|S_IRUGO),
-	lge_touch_sweep2wake_show, lge_touch_sweep2wake_dump);
+	lge_touch_sweep2wake_show, lge_touch_sweep2wake_store);
 #endif
 
 static struct kobject *android_touch_kobj;

@@ -32,7 +32,7 @@
 #include <linux/input/sweep2wake.h>
 
 /* Tuneables */
-#define DEBUG                   1
+#define DEBUG                   0
 #define DEFAULT_S2W_Y_LIMIT             2350
 #define DEFAULT_S2W_X_MAX               1540
 #define DEFAULT_S2W_X_B1                500

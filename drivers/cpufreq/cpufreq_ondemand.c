@@ -41,6 +41,8 @@
 #define MIN_FREQUENCY_UP_THRESHOLD		(11)
 #define MAX_FREQUENCY_UP_THRESHOLD		(100)
 #define MIN_FREQUENCY_DOWN_DIFFERENTIAL		(1)
+#define DBS_SYNC_FREQ				(702000)
+#define DBS_OPTIMAL_FREQ			(1296000)
 
 /*
  * The polling frequency of this governor depends on the capability of
@@ -146,8 +148,8 @@ static struct dbs_tuners {
 	.up_threshold_any_cpu_load = DEF_FREQUENCY_UP_THRESHOLD,
 	.ignore_nice = 0,
 	.powersave_bias = 0,
-	.sync_freq = 0,
-	.optimal_freq = 0,
+	.sync_freq = DBS_SYNC_FREQ,
+	.optimal_freq = DBS_OPTIMAL_FREQ,
 };
 
 static inline u64 get_cpu_idle_time_jiffy(unsigned int cpu, u64 *wall)

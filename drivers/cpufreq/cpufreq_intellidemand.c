@@ -56,10 +56,6 @@
 #define DBS_SYNC_FREQ				(702000)
 #define DBS_OPTIMAL_FREQ			(1296000)
 
-#ifdef CONFIG_CPUFREQ_ID_PERFLOCK
-#define DBS_PERFLOCK_MIN_FREQ			(702000)
-#endif
-
 u64 freq_boosted_time;
 /*
  * The polling frequency of this governor depends on the capability of

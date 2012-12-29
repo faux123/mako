@@ -95,8 +95,6 @@ unsigned int current_sampling_rate;
 static unsigned int saved_policy_min;
 #endif
 
-static unsigned int eco_mode_active = 0;
-
 static void do_dbs_timer(struct work_struct *work);
 static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 				unsigned int event);
@@ -400,26 +398,6 @@ static ssize_t show_lmf_inactive_load(struct kobject *kobj,
 	return sprintf(buf, "%ld\n", get_lmf_inactive_load());
 }
 #endif
-
-static ssize_t show_eco_mode(struct kobject *kobj,
-                                      struct attribute *attr, char *buf)
-{
-        return sprintf(buf, "%u\n", eco_mode_active);
-}
-
-static ssize_t store_eco_mode(struct kobject *kobj, struct attribute *attr,
-                                const char *buf, size_t count)
-{
-	unsigned int input;
-	int ret;
-
-	ret = sscanf(buf, "%u", &input);
-	if (ret != 1)
-		return -EINVAL;
-
-	eco_mode_active = input;
-	return count;
-}
 
 static ssize_t show_powersave_bias
 (struct kobject *kobj, struct attribute *attr, char *buf)
@@ -920,7 +898,6 @@ define_one_global_rw(boostpulse);
 define_one_global_rw(boosttime);
 define_one_global_rw(boostfreq);
 define_one_global_rw(two_phase_freq);
-define_one_global_rw(eco_mode);
 
 #ifdef CONFIG_CPUFREQ_LIMIT_MAX_FREQ
 define_one_global_rw(lmf_browser);
@@ -954,7 +931,6 @@ static struct attribute *dbs_attributes[] = {
 	&lmf_active_load.attr,
 	&lmf_inactive_load.attr,
 #endif
-	&eco_mode.attr,
 	NULL
 };
 

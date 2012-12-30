@@ -1650,11 +1650,15 @@ static void dbs_refresh_callback(struct work_struct *work)
 	}
 
 	if (policy->cur < DBS_INPUT_EVENT_MIN_FREQ) {
+		 //pr_info("%s: set cpufreq to DBS_INPUT_EVENT_MIN_FREQ(%d)
+		 //	directly due to input events!\n", __func__, DBS_INPUT_EVENT_MIN_FREQ);
 		/*
-		pr_info("%s: set cpufreq to DBS_INPUT_EVENT_MIN_FREQ(%d) directly due to input events!\n", __func__, DBS_INPUT_EVENT_MIN_FREQ);
-		*/
-		__cpufreq_driver_target(policy, DBS_INPUT_EVENT_MIN_FREQ,
-					CPUFREQ_RELATION_L);
+		 * Arch specific cpufreq driver may fail.
+		 * Don't update governor frequency upon failure.
+		 */
+		if (__cpufreq_driver_target(policy, DBS_INPUT_EVENT_MIN_FREQ,
+					CPUFREQ_RELATION_L) >= 0);
+			policy->cur = DBS_INPUT_EVENT_MIN_FREQ;
 		this_dbs_info->prev_cpu_idle = get_cpu_idle_time(cpu,
 				&this_dbs_info->prev_cpu_wall);
 	}

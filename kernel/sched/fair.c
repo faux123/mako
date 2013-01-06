@@ -3363,19 +3363,57 @@ static inline int get_sd_sched_policy(struct sched_domain *sd,
 }
 
 /*
+ * find_leader_cpu - find the busiest but still has enough leisure time cpu
+ * among the cpus in group.
+ */
+static int
+find_leader_cpu(struct sched_group *group, struct task_struct *p, int this_cpu)
+{
+	unsigned vacancy, min_vacancy = UINT_MAX;
+	int idlest = -1;
+	int i;
+	/* percentage the task's util */
+	unsigned putil = p->se.avg.runnable_avg_sum * 100
+				/ (p->se.avg.runnable_avg_period + 1);
+
+	/* Traverse only the allowed CPUs */
+	for_each_cpu_and(i, sched_group_cpus(group), tsk_cpus_allowed(p)) {
+		struct rq *rq = cpu_rq(i);
+		int nr_running = rq->nr_running > 0 ? rq->nr_running : 1;
+
+		/* only pack task which putil < 12.5% */
+		vacancy = FULL_UTIL - (rq->util * nr_running + putil * 8);
+
+		/* bias toward local cpu */
+		if (vacancy > 0 && (i == this_cpu))
+			return i;
+
+		if (vacancy > 0 && vacancy < min_vacancy) {
+			min_vacancy = vacancy;
+			idlest = i;
+		}
+	}
+	return idlest;
+}
+
+/*
  * If power policy is eligible for this domain, and it has task allowed cpu.
  * we will select CPU from this domain.
  */
 static int get_cpu_for_power_policy(struct sched_domain *sd, int cpu,
-		struct task_struct *p, struct sd_lb_stats *sds)
+		struct task_struct *p, struct sd_lb_stats *sds, int fork)
 {
 	int policy;
 	int new_cpu = -1;
 
 	policy = get_sd_sched_policy(sd, cpu, p, sds);
-	if (policy != SCHED_POLICY_PERFORMANCE && sds->group_leader)
-		new_cpu = find_idlest_cpu(sds->group_leader, p, cpu);
-
+	if (policy != SCHED_POLICY_PERFORMANCE && sds->group_leader) {
+		if (!fork)
+			new_cpu = find_leader_cpu(sds->group_leader, p, cpu);
+		/* for fork balancing and a little busy task */
+		if (new_cpu == -1)
+			new_cpu = find_idlest_cpu(sds->group_leader, p, cpu);
+	}
 	return new_cpu;
 }
 
@@ -3460,14 +3498,15 @@ select_task_rq_fair(struct task_struct *p, int sd_flag, int flags)
 		if (want_sd) {
 			sd = tmp;
 
-			new_cpu = get_cpu_for_power_policy(sd, cpu, p, &sds);
+			new_cpu = get_cpu_for_power_policy(sd, cpu, p, &sds,
+						flags & SD_BALANCE_FORK);
 			if (new_cpu != -1)
 				goto unlock;
 		}
 	}
 
 	if (affine_sd) {
-		new_cpu = get_cpu_for_power_policy(affine_sd, cpu, p, &sds);
+		new_cpu = get_cpu_for_power_policy(affine_sd, cpu, p, &sds, 0);
 		if (new_cpu != -1)
 			goto unlock;
 

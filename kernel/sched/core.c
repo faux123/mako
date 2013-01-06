@@ -2565,7 +2565,11 @@ static void __update_cpu_load(struct rq *this_rq, unsigned long this_load,
 void update_idle_cpu_load(struct rq *this_rq)
 {
 	unsigned long curr_jiffies = jiffies;
-	unsigned long load = this_rq->load.weight;
+#if defined(CONFIG_SMP) && defined(CONFIG_FAIR_GROUP_SCHED)
+	unsigned long load = (unsigned long)this_rq->cfs.runnable_load_avg;
+#else
+ 	unsigned long load = this_rq->load.weight;
+#endif
 	unsigned long pending_updates;
 
 	/*
@@ -2596,7 +2600,11 @@ static void update_cpu_load_active(struct rq *this_rq)
 	 * See the mess in update_idle_cpu_load().
 	 */
 	this_rq->last_load_update_tick = jiffies;
+#if defined(CONFIG_SMP) && defined(CONFIG_FAIR_GROUP_SCHED)
+	__update_cpu_load(this_rq, this_rq->cfs.runnable_load_avg, 1);
+#else
 	__update_cpu_load(this_rq, this_rq->load.weight, 1);
+#endif
 
 	calc_load_account_active(this_rq);
 }

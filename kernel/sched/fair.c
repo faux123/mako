@@ -6113,6 +6113,8 @@ static unsigned int get_rr_interval_fair(struct rq *rq, struct task_struct *task
 	return rr_interval;
 }
 
+/* The default scheduler policy is 'performance'. */
+int __read_mostly sched_policy = SCHED_POLICY_PERFORMANCE;
 /*
  * All the scheduling class methods:
  */

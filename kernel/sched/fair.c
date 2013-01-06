@@ -3247,6 +3247,7 @@ struct sd_lb_stats {
 	unsigned int  sd_utils;	/* sum utilizations of this domain */
 	unsigned long sd_capacity;	/* capacity of this domain */
 	struct sched_group *group_leader; /* Group which relieves group_min */
+	struct sched_group *group_min;	/* Least loaded group in sd */
 	unsigned long min_load_per_task; /* load_per_task in group_min */
 	unsigned int  leader_util;	/* sum utilizations of group_leader */
 	unsigned int  min_util;		/* sum utilizations of group_min */
@@ -4172,6 +4173,106 @@ static unsigned long task_h_load_avg(struct task_struct *p)
 }
 
 /********** Helpers for find_busiest_group ************************/
+
+/**
+ * init_sd_lb_power_stats - Initialize power savings statistics for
+ * the given sched_domain, during load balancing.
+ *
+ * @env: The load balancing environment.
+ * @sds: Variable containing the statistics for sd.
+ */
+static inline void init_sd_lb_power_stats(struct lb_env *env,
+						struct sd_lb_stats *sds)
+{
+	if (sched_policy == SCHED_POLICY_PERFORMANCE ||
+				env->idle == CPU_NOT_IDLE) {
+		env->power_lb = 0;
+		env->perf_lb = 1;
+		return;
+	}
+	env->perf_lb = 0;
+	env->power_lb = 1;
+	sds->min_util = UINT_MAX;
+	sds->leader_util = 0;
+}
+
+/**
+ * update_sd_lb_power_stats - Update the power saving stats for a
+ * sched_domain while performing load balancing.
+ *
+ * @env: The load balancing environment.
+ * @group: sched_group belonging to the sched_domain under consideration.
+ * @sds: Variable containing the statistics of the sched_domain
+ * @local_group: Does group contain the CPU for which we're performing
+ * load balancing?
+ * @sgs: Variable containing the statistics of the group.
+ */
+static inline void update_sd_lb_power_stats(struct lb_env *env,
+			struct sched_group *group, struct sd_lb_stats *sds,
+			int local_group, struct sg_lb_stats *sgs)
+{
+	unsigned long threshold, threshold_util;
+
+	if (!env->power_lb)
+		return;
+
+	if (sched_policy == SCHED_POLICY_POWERSAVING)
+		threshold = sgs->group_weight;
+	else
+		threshold = sgs->group_capacity;
+	threshold_util = threshold * FULL_UTIL;
+
+	/*
+	 * If the local group is idle or full loaded
+	 * no need to do power savings balance at this domain
+	 */
+	if (local_group && (!sgs->sum_nr_running ||
+		sgs->group_utils + FULL_UTIL > threshold_util))
+		env->power_lb = 0;
+
+	/* Do performance load balance if any group overload */
+	if (sgs->group_utils > threshold_util) {
+		env->perf_lb = 1;
+		env->power_lb = 0;
+	}
+
+	/*
+	 * If a group is idle,
+	 * don't include that group in power savings calculations
+	 */
+	if (!env->power_lb || !sgs->sum_nr_running)
+		return;
+
+	/*
+	 * Calculate the group which has the least non-idle load.
+	 * This is the group from where we need to pick up the load
+	 * for saving power
+	 */
+	if ((sgs->group_utils < sds->min_util) ||
+	    (sgs->group_utils == sds->min_util &&
+	     group_first_cpu(group) > group_first_cpu(sds->group_min))) {
+		sds->group_min = group;
+		sds->min_util = sgs->group_utils;
+		sds->min_load_per_task = sgs->sum_weighted_load /
+						sgs->sum_nr_running;
+	}
+
+	/*
+	 * Calculate the group which is almost near its
+	 * capacity but still has some space to pick up some load
+	 * from other group and save more power
+	 */
+	if (sgs->group_utils + FULL_UTIL > threshold_util)
+		return;
+
+	if (sgs->group_utils > sds->leader_util ||
+	    (sgs->group_utils == sds->leader_util && sds->group_leader &&
+	     group_first_cpu(group) < group_first_cpu(sds->group_leader))) {
+		sds->group_leader = group;
+		sds->leader_util = sgs->group_utils;
+	}
+}
+
 /**
  * get_sd_load_idx - Obtain the load index for a given sched domain.
  * @sd: The sched_domain whose load_idx is to be obtained.
@@ -4487,7 +4588,8 @@ static inline void update_sg_lb_stats(struct lb_env *env,
 			int local_group, const struct cpumask *cpus,
 			int *balance, struct sg_lb_stats *sgs)
 {
-	unsigned long load, max_cpu_load, min_cpu_load, max_nr_running;
+	unsigned long nr_running, max_nr_running, min_nr_running;
+	unsigned long load, max_cpu_load, min_cpu_load;
 	unsigned int balance_cpu = -1, first_idle_cpu = 0;
 	unsigned long avg_load_per_task = 0;
 	int i;
@@ -4499,9 +4601,12 @@ static inline void update_sg_lb_stats(struct lb_env *env,
 	max_cpu_load = 0;
 	min_cpu_load = ~0UL;
 	max_nr_running = 0;
+	min_nr_running = ~0UL;
 
 	for_each_cpu_and(i, sched_group_cpus(group), cpus) {
 		struct rq *rq = cpu_rq(i);
+
+		nr_running = rq->nr_running;
 
 		/* Bias balancing toward cpus of our domain */
 		if (local_group) {
@@ -4520,11 +4625,22 @@ static inline void update_sg_lb_stats(struct lb_env *env,
 			}
 			if (min_cpu_load > load)
 				min_cpu_load = load;
+
+			if (nr_running > max_nr_running)
+				max_nr_running = nr_running;
+			if (min_nr_running > nr_running)
+				min_nr_running = nr_running;
 		}
 
 		sgs->group_load += load;
-		sgs->sum_nr_running += rq->nr_running;
+		sgs->sum_nr_running += nr_running;
 		sgs->sum_weighted_load += weighted_cpuload(i);
+
+		/* accumulate the maximum potential util */
+		if (!nr_running)
+			nr_running = 1;
+		sgs->group_utils += rq->util * nr_running;
+
 		if (idle_cpu(i))
 			sgs->idle_cpus++;
 	}
@@ -4561,7 +4677,8 @@ static inline void update_sg_lb_stats(struct lb_env *env,
 	if (sgs->sum_nr_running)
 		avg_load_per_task = sgs->sum_weighted_load / sgs->sum_nr_running;
 
-	if ((max_cpu_load - min_cpu_load) >= avg_load_per_task && max_nr_running > 1)
+	if ((max_cpu_load - min_cpu_load) >= avg_load_per_task &&
+	    (max_nr_running - min_nr_running) > 1)
 		sgs->group_imb = 1;
 
 	sgs->group_capacity = DIV_ROUND_CLOSEST(group->sgp->power,
@@ -4637,6 +4754,7 @@ static inline void update_sd_lb_stats(struct lb_env *env,
 	if (child && child->flags & SD_PREFER_SIBLING)
 		prefer_sibling = 1;
 
+	init_sd_lb_power_stats(env, sds);
 	init_sd_power_savings_stats(env->sd, sds, env->idle);
 	load_idx = get_sd_load_idx(env->sd, env->idle);
 
@@ -4689,7 +4807,7 @@ static inline void update_sd_lb_stats(struct lb_env *env,
 			sds->busiest_group_weight = sgs.group_weight;
 			sds->group_imb = sgs.group_imb;
 		}
-
+		update_sd_lb_power_stats(env, sg, sds, local_group, &sgs);
 		update_sd_power_savings_stats(sg, sds, local_group, &sgs);
 		sg = sg->next;
 	} while (sg != env->sd->groups);
@@ -4910,6 +5028,19 @@ find_busiest_group(struct lb_env *env, const struct cpumask *cpus, int *balance)
 
 	memset(&sds, 0, sizeof(sds));
 
+	if (!env->perf_lb && !env->power_lb)
+		return  NULL;
+
+	if (env->power_lb) {
+		if (sds.this == sds.group_leader &&
+				sds.group_leader != sds.group_min) {
+			env->imbalance = sds.min_load_per_task;
+			return sds.group_min;
+		}
+		env->power_lb = 0;
+		return NULL;
+	}
+
 	/*
 	 * Compute the various statistics relavent for load balancing at
 	 * this level.
@@ -5119,8 +5250,8 @@ static int load_balance(int this_cpu, struct rq *this_rq,
 		.dst_rq		= this_rq,
 		.idle		= idle,
 		.loop_break	= sched_nr_migrate_break,
-		.power_lb	= 0,
-		.perf_lb	= 1,
+		.power_lb	= 1,
+		.perf_lb	= 0,
 	};
 
 	cpumask_copy(cpus, cpu_active_mask);

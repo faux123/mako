@@ -1119,6 +1119,7 @@ struct sched_domain;
 #else
 #define ENQUEUE_WAKING		0
 #endif
+#define ENQUEUE_NEWTASK		8
 
 #define DEQUEUE_SLEEP		1
 

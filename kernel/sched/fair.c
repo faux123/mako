@@ -3303,10 +3303,8 @@ select_task_rq_fair(struct task_struct *p, int sd_flag, int wake_flags)
 			load_idx = sd->wake_idx;
 
 		group = find_idlest_group(sd, p, cpu, load_idx);
-		if (!group) {
-			sd = sd->child;
-			continue;
-		}
+		if (!group)
+			goto unlock;
 
 		new_cpu = find_idlest_cpu(group, p, cpu);
 

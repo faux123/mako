@@ -3042,6 +3042,7 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p,
 		  int this_cpu, int load_idx)
 {
 	struct sched_group *idlest = NULL, *group = sd->groups;
+	struct sched_group *this_group = NULL;
 	unsigned long min_load = ULONG_MAX, this_load = 0;
 	int imbalance = 100 + (sd->imbalance_pct-100)/2;
 
@@ -3076,14 +3077,19 @@ find_idlest_group(struct sched_domain *sd, struct task_struct *p,
 
 		if (local_group) {
 			this_load = avg_load;
-		} else if (avg_load < min_load) {
+			this_group = group;
+		}
+		if (avg_load < min_load) {
 			min_load = avg_load;
 			idlest = group;
 		}
 	} while (group = group->next, group != sd->groups);
 
-	if (!idlest || 100*this_load < imbalance*min_load)
-		return NULL;
+	if (this_group && idlest != this_group)
+		/* Bias toward our group again */
+		if (100*this_load < imbalance*min_load)
+			idlest = this_group;
+
 	return idlest;
 }
 

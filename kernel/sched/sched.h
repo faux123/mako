@@ -350,6 +350,9 @@ extern struct root_domain def_root_domain;
 
 #endif /* CONFIG_SMP */
 
+/* Take as full load, if the cpu percentage util is up to 99 */
+#define FULL_UTIL	99
+
 /*
  * This is the main, per-CPU runqueue data structure.
  *
@@ -482,6 +485,7 @@ struct rq {
 #endif
 
 	struct sched_avg avg;
+	unsigned int util;
 };
 
 static inline int cpu_of(struct rq *rq)

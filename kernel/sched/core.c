@@ -82,7 +82,7 @@
 #endif
 
 #include "sched.h"
-#include "../workqueue_sched.h"
+#include "../workqueue_internal.h"
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/sched.h>

@@ -26,9 +26,9 @@
 #define DEF_SAMPLING_RATE		(50000)
 #define DEF_SAMPLING_MS			(50)
 
-#define DUAL_CORE_PERSISTENCE		50
-#define TRI_CORE_PERSISTENCE		40
-#define QUAD_CORE_PERSISTENCE		30
+#define DUAL_CORE_PERSISTENCE		60
+#define TRI_CORE_PERSISTENCE		50
+#define QUAD_CORE_PERSISTENCE		40
 
 static DEFINE_MUTEX(intelli_plug_mutex);
 
@@ -70,7 +70,7 @@ static unsigned int calculate_thread_stats(void)
 
 	if (!eco_mode_active) {
 		threshold_size =  ARRAY_SIZE(nr_run_thresholds_full);
-		nr_run_hysteresis = 8;
+		nr_run_hysteresis = 2;
 		nr_fshift = 3;
 		//pr_info("intelliplug: full mode active!");
 	}

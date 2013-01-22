@@ -98,7 +98,7 @@ static unsigned int calculate_thread_stats(void)
 	return nr_run;
 }
 
-static void intelli_plug_work_fn(struct work_struct *work)
+static void __cpuinit intelli_plug_work_fn(struct work_struct *work)
 {
 	unsigned int nr_run_stat;
 
@@ -173,7 +173,7 @@ static void intelli_plug_early_suspend(struct early_suspend *handler)
 	}
 }
 
-static void intelli_plug_late_resume(struct early_suspend *handler)
+static void __cpuinit intelli_plug_late_resume(struct early_suspend *handler)
 {
 	int num_of_active_cores;
 	int i;
@@ -199,7 +199,7 @@ static void intelli_plug_late_resume(struct early_suspend *handler)
 		msecs_to_jiffies(10));
 }
 
-static struct early_suspend intelli_plug_early_suspend_struct = {
+static struct early_suspend intelli_plug_early_suspend_struct_driver = {
 	.level = EARLY_SUSPEND_LEVEL_DISABLE_FB + 10,
 	.suspend = intelli_plug_early_suspend,
 	.resume = intelli_plug_late_resume,
@@ -223,7 +223,7 @@ int __init intelli_plug_init(void)
 	schedule_delayed_work_on(0, &intelli_plug_work, delay);
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
-	register_early_suspend(&intelli_plug_early_suspend_struct);
+	register_early_suspend(&intelli_plug_early_suspend_struct_driver);
 #endif
 	return 0;
 }

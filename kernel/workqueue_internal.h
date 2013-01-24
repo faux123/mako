@@ -9,7 +9,6 @@
 
 #include <linux/workqueue.h>
 
-struct global_cwq;
 struct worker_pool;
 
 /*

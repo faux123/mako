@@ -6450,7 +6450,7 @@ static unsigned int get_rr_interval_fair(struct rq *rq, struct task_struct *task
 }
 
 /* The default scheduler policy is 'performance'. */
-int __read_mostly sched_policy = SCHED_POLICY_PERFORMANCE;
+int __read_mostly sched_policy = SCHED_POLICY_POWERSAVING;
 
 #ifdef CONFIG_SYSFS
 static ssize_t show_available_sched_policy(struct device *dev,

@@ -370,6 +370,7 @@ static int ii_iovec_shorten(struct iov_iter *i, size_t count)
 {
 	struct iovec *iov = (struct iovec *)i->data;
 	i->nr_segs = iov_shorten(iov, i->nr_segs, count);
+	i->count = min(i->count, count);
 	return 0;
 }
 

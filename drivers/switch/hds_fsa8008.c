@@ -45,9 +45,9 @@
 #include <linux/platform_data/hds_fsa8008.h>
 
 #define FSA8008_USE_WORK_QUEUE
-#define FSA8008_KEY_LATENCY_TIME	200 /* in ms */
-#define FSA8008_DEBOUNCE_TIME		500 /* in ms */
-#define FSA8008_WAKELOCK_TIMEOUT	(2*HZ)
+#define FSA8008_KEY_LATENCY_TIME	140 /* in ms */
+#define FSA8008_DEBOUNCE_TIME		350 /* in ms */
+#define FSA8008_WAKELOCK_TIMEOUT	(HZ)
 
 #define HSD_DEBUG_PRINT
 

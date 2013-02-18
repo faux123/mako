@@ -19,9 +19,10 @@
 #include <linux/sched.h>
 #include <linux/mutex.h>
 #include <linux/module.h>
+#include <linux/rq_stats.h>
 
 #define INTELLI_PLUG_MAJOR_VERSION	1
-#define INTELLI_PLUG_MINOR_VERSION	1
+#define INTELLI_PLUG_MINOR_VERSION	2
 
 #define DEF_SAMPLING_RATE		(50000)
 #define DEF_SAMPLING_MS			(50)
@@ -29,6 +30,8 @@
 #define DUAL_CORE_PERSISTENCE		50
 #define TRI_CORE_PERSISTENCE		40
 #define QUAD_CORE_PERSISTENCE		30
+
+#define RUN_QUEUE_THRESHOLD		38
 
 static DEFINE_MUTEX(intelli_plug_mutex);
 
@@ -101,13 +104,32 @@ static unsigned int calculate_thread_stats(void)
 static void __cpuinit intelli_plug_work_fn(struct work_struct *work)
 {
 	unsigned int nr_run_stat;
+	unsigned int rq_stat;
+	unsigned int cpu_count = 0;
 
 	if (intelli_plug_active == 1) {
 		nr_run_stat = calculate_thread_stats();
 		//pr_info("nr_run_stat: %u\n", nr_run_stat);
+		rq_stat = rq_info.rq_avg;
+
+		cpu_count = nr_run_stat;
+		// detect artificial loads or constant loads
+		// using msm rqstats
+		if (!eco_mode_active && nr_run_stat > 1) {
+			if (rq_stat >= RUN_QUEUE_THRESHOLD) {
+				switch (num_online_cpus()) {
+					case 2:
+						cpu_count = 3;
+						break;
+					case 3:
+						cpu_count = 4;
+						break;
+				}
+			}
+		}
 
 		if (!suspended) {
-			switch (nr_run_stat) {
+			switch (cpu_count) {
 				case 1:
 					if (persist_count > 0)
 						persist_count--;

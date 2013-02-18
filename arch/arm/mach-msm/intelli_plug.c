@@ -22,7 +22,7 @@
 #include <linux/rq_stats.h>
 
 #define INTELLI_PLUG_MAJOR_VERSION	1
-#define INTELLI_PLUG_MINOR_VERSION	2
+#define INTELLI_PLUG_MINOR_VERSION	3
 
 #define DEF_SAMPLING_RATE		(50000)
 #define DEF_SAMPLING_MS			(50)
@@ -65,6 +65,55 @@ module_param(nr_run_hysteresis, uint, 0644);
 
 static unsigned int nr_run_last;
 
+static unsigned int NwNs_Threshold[] = {13, 30, 15, 11, 17, 11, 0, 11};
+static unsigned int TwTs_Threshold[] = {140, 0, 140, 190, 140, 190, 0, 190};
+
+static int mp_decision(void)
+{
+	static bool first_call = true;
+	int new_state = 0;
+	int nr_cpu_online;
+	int index;
+	unsigned int rq_depth;
+	static cputime64_t total_time = 0;
+	static cputime64_t last_time;
+	cputime64_t current_time;
+	cputime64_t this_time = 0;
+
+	current_time = ktime_to_ms(ktime_get());
+	if (first_call) {
+		first_call = false;
+	} else {
+		this_time = current_time - last_time;
+	}
+	total_time += this_time;
+
+	rq_depth = rq_info.rq_avg;
+	//pr_info(" rq_deptch = %u", rq_depth);
+	nr_cpu_online = num_online_cpus();
+
+	if (nr_cpu_online) {
+		index = (nr_cpu_online - 1) * 2;
+		if ((nr_cpu_online < 4) && (rq_depth >= NwNs_Threshold[index])) {
+			if (total_time >= TwTs_Threshold[index]) {
+				new_state = 1;
+			}
+		} else if (rq_depth <= NwNs_Threshold[index+1]) {
+			if (total_time >= TwTs_Threshold[index+1] ) {
+				new_state = 0;
+			}
+		} else {
+			total_time = 0;
+		}
+	} else {
+		total_time = 0;
+	}
+
+	last_time = ktime_to_ms(ktime_get());
+
+	return new_state;
+}
+
 static unsigned int calculate_thread_stats(void)
 {
 	unsigned int avg_nr_run = avg_nr_running();
@@ -106,6 +155,7 @@ static void __cpuinit intelli_plug_work_fn(struct work_struct *work)
 	unsigned int nr_run_stat;
 	unsigned int rq_stat;
 	unsigned int cpu_count = 0;
+	//int decision = 0;
 
 	if (intelli_plug_active == 1) {
 		nr_run_stat = calculate_thread_stats();
@@ -116,13 +166,15 @@ static void __cpuinit intelli_plug_work_fn(struct work_struct *work)
 		// detect artificial loads or constant loads
 		// using msm rqstats
 		if (!eco_mode_active && nr_run_stat > 1) {
-			if (rq_stat >= RUN_QUEUE_THRESHOLD) {
+			if (mp_decision()) {
 				switch (num_online_cpus()) {
 					case 2:
 						cpu_count = 3;
+						//pr_info("nr_run => %u\n", nr_run_stat);
 						break;
 					case 3:
 						cpu_count = 4;
+						//pr_info("nr_run => %u\n", nr_run_stat);
 						break;
 				}
 			}

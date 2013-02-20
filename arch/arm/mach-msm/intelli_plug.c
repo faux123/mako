@@ -65,8 +65,8 @@ module_param(nr_run_hysteresis, uint, 0644);
 
 static unsigned int nr_run_last;
 
-static unsigned int NwNs_Threshold[] = {13, 30, 15, 11, 17, 11, 0, 11};
-static unsigned int TwTs_Threshold[] = {140, 0, 140, 190, 140, 190, 0, 190};
+static unsigned int NwNs_Threshold[] = { 19, 30,  27,  11,  19,  11, 0,  11};
+static unsigned int TwTs_Threshold[] = {140,  0, 180, 190, 140, 190, 0, 190};
 
 static int mp_decision(void)
 {
@@ -97,10 +97,6 @@ static int mp_decision(void)
 		if ((nr_cpu_online < 4) && (rq_depth >= NwNs_Threshold[index])) {
 			if (total_time >= TwTs_Threshold[index]) {
 				new_state = 1;
-			}
-		} else if (rq_depth <= NwNs_Threshold[index+1]) {
-			if (total_time >= TwTs_Threshold[index+1] ) {
-				new_state = 0;
 			}
 		} else {
 			total_time = 0;

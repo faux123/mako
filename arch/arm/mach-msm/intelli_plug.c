@@ -65,8 +65,8 @@ module_param(nr_run_hysteresis, uint, 0644);
 
 static unsigned int nr_run_last;
 
-static unsigned int NwNs_Threshold[] = { 19, 30,  27,  11,  19,  11, 0,  11};
-static unsigned int TwTs_Threshold[] = {140,  0, 180, 190, 140, 190, 0, 190};
+static unsigned int NwNs_Threshold[] = { 19, 30,  19,  11,  19,  11, 0,  11};
+static unsigned int TwTs_Threshold[] = {140,  0, 140, 190, 140, 190, 0, 190};
 
 static int mp_decision(void)
 {

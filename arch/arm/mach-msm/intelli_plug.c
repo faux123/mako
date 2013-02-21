@@ -161,16 +161,16 @@ static void __cpuinit intelli_plug_work_fn(struct work_struct *work)
 		cpu_count = nr_run_stat;
 		// detect artificial loads or constant loads
 		// using msm rqstats
-		if (!eco_mode_active && nr_run_stat > 1) {
+		if (!eco_mode_active && num_online_cpus() >= 2) {
 			if (mp_decision()) {
 				switch (num_online_cpus()) {
 					case 2:
 						cpu_count = 3;
-						//pr_info("nr_run => %u\n", nr_run_stat);
+						pr_info("nr_run(2) => %u\n", nr_run_stat);
 						break;
 					case 3:
 						cpu_count = 4;
-						//pr_info("nr_run => %u\n", nr_run_stat);
+						pr_info("nr_run(3) => %u\n", nr_run_stat);
 						break;
 				}
 			}

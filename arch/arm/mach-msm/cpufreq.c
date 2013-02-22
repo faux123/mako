@@ -192,6 +192,13 @@ int msm_cpufreq_set_freq_limits(uint32_t cpu, uint32_t min, uint32_t max)
 }
 EXPORT_SYMBOL(msm_cpufreq_set_freq_limits);
 
+#ifdef CONFIG_CPU_OVERCLOCK
+#ifdef CONFIG_OC_ULTIMATE
+#define OC_CPU_FREQ_MAX 1944000
+#else
+#define OC_CPU_FREQ_MAX 1836000
+#endif
+#endif
 static int __cpuinit msm_cpufreq_init(struct cpufreq_policy *policy)
 {
 	int cur_freq;
@@ -212,12 +219,20 @@ static int __cpuinit msm_cpufreq_init(struct cpufreq_policy *policy)
 	if (cpufreq_frequency_table_cpuinfo(policy, table)) {
 #ifdef CONFIG_MSM_CPU_FREQ_SET_MIN_MAX
 		policy->cpuinfo.min_freq = CONFIG_MSM_CPU_FREQ_MIN;
+#ifdef CONFIG_CPU_OVERCLOCK
+		policy->cpuinfo.max_freq = OC_CPU_FREQ_MAX;
+#else
 		policy->cpuinfo.max_freq = CONFIG_MSM_CPU_FREQ_MAX;
+#endif
 #endif
 	}
 #ifdef CONFIG_MSM_CPU_FREQ_SET_MIN_MAX
 	policy->min = CONFIG_MSM_CPU_FREQ_MIN;
+#ifdef CONFIG_CPU_OVERCLOCK
+	policy->max = OC_CPU_FREQ_MAX;
+#else
 	policy->max = CONFIG_MSM_CPU_FREQ_MAX;
+#endif
 #endif
 
 	cur_freq = acpuclk_get_rate(policy->cpu);
@@ -284,33 +299,17 @@ extern bool lmf_screen_state;
 
 static void msm_cpu_early_suspend(struct early_suspend *h)
 {
-
-#ifdef CONFIG_CPU_FREQ_GOV_INTELLIDEMAND
 	int cpu = 0;
 
 	for_each_possible_cpu(cpu) {
-
 		mutex_lock(&per_cpu(cpufreq_suspend, cpu).suspend_mutex);
 		lmf_screen_state = false;
-		// put rest of the cores to sleep!
-		switch (num_online_cpus()) {
-		case 4:
-			cpu_down(3);
-		case 3:
-			cpu_down(2);
-		case 2:
-			cpu_down(1);
-		}
 		mutex_unlock(&per_cpu(cpufreq_suspend, cpu).suspend_mutex);
 	}
-#endif
-
 }
 
 static void msm_cpu_late_resume(struct early_suspend *h)
 {
-
-#ifdef CONFIG_CPU_FREQ_GOV_INTELLIDEMAND
 	int cpu = 0;
 
 	for_each_possible_cpu(cpu) {
@@ -319,8 +318,6 @@ static void msm_cpu_late_resume(struct early_suspend *h)
 		lmf_screen_state = true;
 		mutex_unlock(&per_cpu(cpufreq_suspend, cpu).suspend_mutex);
 	}
-#endif
-
 }
 
 static struct early_suspend msm_cpu_early_suspend_handler = {

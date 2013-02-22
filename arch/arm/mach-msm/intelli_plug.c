@@ -22,7 +22,7 @@
 #include <linux/rq_stats.h>
 
 #define INTELLI_PLUG_MAJOR_VERSION	1
-#define INTELLI_PLUG_MINOR_VERSION	3
+#define INTELLI_PLUG_MINOR_VERSION	4
 
 #define DEF_SAMPLING_RATE		(50000)
 #define DEF_SAMPLING_MS			(50)
@@ -32,6 +32,8 @@
 #define QUAD_CORE_PERSISTENCE		30
 
 #define RUN_QUEUE_THRESHOLD		38
+
+#define CPU_DOWN_FACTOR			2
 
 static DEFINE_MUTEX(intelli_plug_mutex);
 
@@ -98,6 +100,10 @@ static int mp_decision(void)
 			if (total_time >= TwTs_Threshold[index]) {
 				new_state = 1;
 			}
+		} else if (rq_depth <= NwNs_Threshold[index+1]) {
+			if (total_time >= TwTs_Threshold[index+1] ) {
+				new_state = 0;
+			}
 		} else {
 			total_time = 0;
 		}
@@ -151,7 +157,9 @@ static void __cpuinit intelli_plug_work_fn(struct work_struct *work)
 	unsigned int nr_run_stat;
 	unsigned int rq_stat;
 	unsigned int cpu_count = 0;
-	//int decision = 0;
+	unsigned int nr_cpus = 0;
+
+	int decision = 0;
 
 	if (intelli_plug_active == 1) {
 		nr_run_stat = calculate_thread_stats();
@@ -161,16 +169,18 @@ static void __cpuinit intelli_plug_work_fn(struct work_struct *work)
 		cpu_count = nr_run_stat;
 		// detect artificial loads or constant loads
 		// using msm rqstats
-		if (!eco_mode_active && num_online_cpus() >= 2) {
-			if (mp_decision()) {
-				switch (num_online_cpus()) {
+		nr_cpus = num_online_cpus();
+		if (!eco_mode_active && (nr_cpus >= 1 && nr_cpus < 4)) {
+			decision = mp_decision();
+			if (decision) {
+				switch (nr_cpus) {
 					case 2:
 						cpu_count = 3;
-						pr_info("nr_run(2) => %u\n", nr_run_stat);
+						//pr_info("nr_run(2) => %u\n", nr_run_stat);
 						break;
 					case 3:
 						cpu_count = 4;
-						pr_info("nr_run(3) => %u\n", nr_run_stat);
+						//pr_info("nr_run(3) => %u\n", nr_run_stat);
 						break;
 				}
 			}
@@ -181,7 +191,7 @@ static void __cpuinit intelli_plug_work_fn(struct work_struct *work)
 				case 1:
 					if (persist_count > 0)
 						persist_count--;
-					if (num_online_cpus() == 2 && persist_count == 0)
+					if (nr_cpus == 2 && persist_count == 0)
 						cpu_down(1);
 					if (eco_mode_active) {
 						cpu_down(3);
@@ -191,7 +201,9 @@ static void __cpuinit intelli_plug_work_fn(struct work_struct *work)
 					break;
 				case 2:
 					persist_count = DUAL_CORE_PERSISTENCE;
-					if (num_online_cpus() == 1)
+					if (!decision)
+						persist_count = DUAL_CORE_PERSISTENCE / CPU_DOWN_FACTOR;
+					if (nr_cpus == 1)
 						cpu_up(1);
 					else {
 						cpu_down(3);
@@ -201,7 +213,9 @@ static void __cpuinit intelli_plug_work_fn(struct work_struct *work)
 					break;
 				case 3:
 					persist_count = TRI_CORE_PERSISTENCE;
-					if (num_online_cpus() == 2)
+					if (!decision)	
+						persist_count = TRI_CORE_PERSISTENCE / CPU_DOWN_FACTOR;
+					if (nr_cpus == 2)
 						cpu_up(2);
 					else
 						cpu_down(3);
@@ -209,7 +223,9 @@ static void __cpuinit intelli_plug_work_fn(struct work_struct *work)
 					break;
 				case 4:
 					persist_count = QUAD_CORE_PERSISTENCE;
-					if (num_online_cpus() == 3)
+					if (!decision)	
+						persist_count = QUAD_CORE_PERSISTENCE / CPU_DOWN_FACTOR;
+					if (nr_cpus == 3)
 						cpu_up(3);
 					//pr_info("case 4: %u\n", persist_count);
 					break;

@@ -124,7 +124,7 @@ static unsigned int calculate_thread_stats(void)
 
 	if (!eco_mode_active) {
 		threshold_size =  ARRAY_SIZE(nr_run_thresholds_full);
-		nr_run_hysteresis = 2;
+		nr_run_hysteresis = 8;
 		nr_fshift = 3;
 		//pr_info("intelliplug: full mode active!");
 	}

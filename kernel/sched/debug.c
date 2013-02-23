@@ -318,7 +318,6 @@ static void print_cpu(struct seq_file *m, int cpu)
 
 	P(ttwu_count);
 	P(ttwu_local);
-	P(util);
 
 #undef P
 #undef P64

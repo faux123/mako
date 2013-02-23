@@ -213,9 +213,9 @@ static inline void msmsdcc_sps_exit(struct msmsdcc_host *host) {}
 #endif /* CONFIG_MMC_MSM_SPS_SUPPORT */
 
 /**
- * Apply soft reset to all SDCC BAM pipes
+ * Apply reset
  *
- * This function applies soft reset to SDCC BAM pipe.
+ * This function resets SPS BAM and DML cores.
  *
  * This function should be called to recover from error
  * conditions encountered during CMD/DATA tranfsers with card.
@@ -223,43 +223,64 @@ static inline void msmsdcc_sps_exit(struct msmsdcc_host *host) {}
  * @host - Pointer to driver's host structure
  *
  */
-static void msmsdcc_sps_pipes_reset_and_restore(struct msmsdcc_host *host)
+static int msmsdcc_bam_dml_reset_and_restore(struct msmsdcc_host *host)
 {
 	int rc;
 
+	/* Reset and init DML */
+	rc = msmsdcc_dml_init(host);
+	if (rc) {
+		pr_err("%s: msmsdcc_dml_init error=%d\n",
+				mmc_hostname(host->mmc), rc);
+		goto out;
+	}
+
 	/* Reset all SDCC BAM pipes */
 	rc = msmsdcc_sps_reset_ep(host, &host->sps.prod);
-	if (rc)
-		pr_err("%s:msmsdcc_sps_reset_ep(prod) error=%d\n",
+	if (rc) {
+		pr_err("%s: msmsdcc_sps_reset_ep(prod) error=%d\n",
 				mmc_hostname(host->mmc), rc);
-	rc = msmsdcc_sps_reset_ep(host, &host->sps.cons);
-	if (rc)
-		pr_err("%s:msmsdcc_sps_reset_ep(cons) error=%d\n",
-				mmc_hostname(host->mmc), rc);
+		goto out;
+	}
 
-	if (host->sps.reset_device) {
-		rc = sps_device_reset(host->sps.bam_handle);
-		if (rc)
-			pr_err("%s: sps_device_reset error=%d\n",
+	rc = msmsdcc_sps_reset_ep(host, &host->sps.cons);
+	if (rc) {
+		pr_err("%s: msmsdcc_sps_reset_ep(cons) error=%d\n",
 				mmc_hostname(host->mmc), rc);
-		host->sps.reset_device = false;
+		goto out;
+	}
+
+	/* Reset BAM */
+	rc = sps_device_reset(host->sps.bam_handle);
+	if (rc) {
+		pr_err("%s: sps_device_reset error=%d\n",
+				mmc_hostname(host->mmc), rc);
+		goto out;
 	}
 
 	/* Restore all BAM pipes connections */
 	rc = msmsdcc_sps_restore_ep(host, &host->sps.prod);
-	if (rc)
-		pr_err("%s:msmsdcc_sps_restore_ep(prod) error=%d\n",
+	if (rc) {
+		pr_err("%s: msmsdcc_sps_restore_ep(prod) error=%d\n",
 				mmc_hostname(host->mmc), rc);
+		goto out;
+	}
+
 	rc = msmsdcc_sps_restore_ep(host, &host->sps.cons);
 	if (rc)
-		pr_err("%s:msmsdcc_sps_restore_ep(cons) error=%d\n",
+		pr_err("%s: msmsdcc_sps_restore_ep(cons) error=%d\n",
 				mmc_hostname(host->mmc), rc);
+	else
+		host->sps.reset_bam = false;
+
+out:
+	return rc;
 }
 
 /**
  * Apply soft reset
  *
- * This function applies soft reset to SDCC core and DML core.
+ * This function applies soft reset to SDCC core.
  *
  * This function should be called to recover from error
  * conditions encountered with CMD/DATA tranfsers with card.
@@ -354,25 +375,25 @@ static void msmsdcc_hard_reset(struct msmsdcc_host *host)
 static void msmsdcc_reset_and_restore(struct msmsdcc_host *host)
 {
 	if (is_soft_reset(host)) {
-		if (is_sps_mode(host)) {
-			/* Reset DML first */
-			msmsdcc_dml_reset(host);
+		if (is_sps_mode(host))
 			/*
-			 * delay the SPS pipe reset in thread context as
+			 * delay the SPS BAM reset in thread context as
 			 * sps_connect/sps_disconnect APIs can be called
 			 * only from non-atomic context.
 			 */
-			host->sps.pipe_reset_pending = true;
-		}
-		mb();
+			host->sps.reset_bam = true;
+
 		msmsdcc_soft_reset(host);
 
 		pr_debug("%s: Applied soft reset to Controller\n",
 				mmc_hostname(host->mmc));
-
-		if (is_sps_mode(host))
-			msmsdcc_dml_init(host);
 	} else {
+		/*
+		 * When there is a requirement to use this hard reset,
+		 * BAM needs to be reconfigured as well by calling
+		 * msmsdcc_sps_exit and msmsdcc_sps_init.
+		 */
+
 		/* Give Clock reset (hard reset) to controller */
 		u32	mci_clk = 0;
 		u32	mci_mask0 = 0;
@@ -1165,15 +1186,16 @@ msmsdcc_start_command_deferred(struct msmsdcc_host *host,
 	if (mmc_cmd_type(cmd) == MMC_CMD_ADTC)
 		*c |= MCI_CSPM_DATCMD;
 
-	/* Check if AUTO CMD19 is required or not? */
+	/* Check if AUTO CMD19/CMD21 is required or not? */
 	if (host->tuning_needed &&
-		!(host->mmc->ios.timing == MMC_TIMING_MMC_HS200)) {
-
+		(host->en_auto_cmd19 || host->en_auto_cmd21)) {
 		/*
 		 * For open ended block read operation (without CMD23),
-		 * AUTO_CMD19 bit should be set while sending the READ command.
+		 * AUTO_CMD19/AUTO_CMD21 bit should be set while sending
+		 * the READ command.
 		 * For close ended block read operation (with CMD23),
-		 * AUTO_CMD19 bit should be set while sending CMD23.
+		 * AUTO_CMD19/AUTO_CMD21 bit should be set while sending
+		 * CMD23.
 		 */
 		if ((cmd->opcode == MMC_SET_BLOCK_COUNT &&
 			host->curr.mrq->cmd->opcode ==
@@ -1182,7 +1204,12 @@ msmsdcc_start_command_deferred(struct msmsdcc_host *host,
 			(cmd->opcode == MMC_READ_SINGLE_BLOCK ||
 			cmd->opcode == MMC_READ_MULTIPLE_BLOCK))) {
 			msmsdcc_enable_cdr_cm_sdc4_dll(host);
-			*c |= MCI_CSPM_AUTO_CMD19;
+			if (host->en_auto_cmd19 &&
+			    host->mmc->ios.timing == MMC_TIMING_UHS_SDR104)
+				*c |= MCI_CSPM_AUTO_CMD19;
+			else if (host->en_auto_cmd21 &&
+			    host->mmc->ios.timing == MMC_TIMING_MMC_HS200)
+				*c |= MCI_CSPM_AUTO_CMD21;
 		}
 	}
 
@@ -1349,32 +1376,41 @@ static void
 msmsdcc_data_err(struct msmsdcc_host *host, struct mmc_data *data,
 		 unsigned int status)
 {
-	if (status & MCI_DATACRCFAIL) {
-		if (!(data->mrq->cmd->opcode == MMC_BUS_TEST_W
-			|| data->mrq->cmd->opcode == MMC_BUS_TEST_R
-			|| data->mrq->cmd->opcode ==
-				MMC_SEND_TUNING_BLOCK_HS200)) {
-			pr_err("%s: Data CRC error\n",
-			       mmc_hostname(host->mmc));
-			pr_err("%s: opcode 0x%.8x\n", __func__,
-			       data->mrq->cmd->opcode);
-			pr_err("%s: blksz %d, blocks %d\n", __func__,
-			       data->blksz, data->blocks);
-			data->error = -EILSEQ;
+	if ((status & MCI_DATACRCFAIL) || (status & MCI_DATATIMEOUT)) {
+		u32 opcode = data->mrq->cmd->opcode;
+
+		if (!((!host->tuning_in_progress && opcode == MMC_BUS_TEST_W)
+		    || (opcode == MMC_BUS_TEST_R) ||
+		    (host->tuning_in_progress &&
+		    (opcode == MMC_SEND_TUNING_BLOCK_HS200 ||
+		     opcode == MMC_SEND_TUNING_BLOCK)))) {
+			if (status & MCI_DATACRCFAIL) {
+				pr_err("%s: Data CRC error\n",
+				       mmc_hostname(host->mmc));
+				pr_err("%s: opcode 0x%.8x\n", __func__, opcode);
+				pr_err("%s: blksz %d, blocks %d\n", __func__,
+				       data->blksz, data->blocks);
+			} else {
+				pr_err("%s: CMD%d: Data timeout. DAT0 => %d\n",
+					 mmc_hostname(host->mmc), opcode,
+					 (readl_relaxed(host->base
+					 + MCI_TEST_INPUT) & 0x2) ? 1 : 0);
+				msmsdcc_dump_sdcc_state(host);
+			}
 		}
-	} else if (status & MCI_DATATIMEOUT) {
-		/* CRC is optional for the bus test commands, not all
+
+		/*
+		 * CRC is optional for the bus test commands, not all
 		 * cards respond back with CRC. However controller
 		 * waits for the CRC and times out. Hence ignore the
 		 * data timeouts during the Bustest.
 		 */
-		if (!(data->mrq->cmd->opcode == MMC_BUS_TEST_W
-			|| data->mrq->cmd->opcode == MMC_BUS_TEST_R)) {
-			pr_err("%s: CMD%d: Data timeout\n",
-				 mmc_hostname(host->mmc),
-				 data->mrq->cmd->opcode);
-			data->error = -ETIMEDOUT;
-			msmsdcc_dump_sdcc_state(host);
+		if (!((!host->tuning_in_progress && opcode == MMC_BUS_TEST_W)
+		    || (opcode == MMC_BUS_TEST_R))) {
+			if (status & MCI_DATACRCFAIL)
+				data->error = -EILSEQ;
+			else
+				data->error = -ETIMEDOUT;
 		}
 	} else if (status & MCI_RXOVERRUN) {
 		pr_err("%s: RX overrun\n", mmc_hostname(host->mmc));
@@ -2073,6 +2109,7 @@ msmsdcc_request(struct mmc_host *mmc, struct mmc_request *mrq)
 {
 	struct msmsdcc_host *host = mmc_priv(mmc);
 	unsigned long		flags;
+	int retries = 5;
 
 	/*
 	 * Get the SDIO AL client out of LPM.
@@ -2081,10 +2118,14 @@ msmsdcc_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	if (host->plat->is_sdio_al_client)
 		msmsdcc_sdio_al_lpm(mmc, false);
 
-	/* check if sps pipe reset is pending? */
-	if (is_sps_mode(host) && host->sps.pipe_reset_pending) {
-		msmsdcc_sps_pipes_reset_and_restore(host);
-		host->sps.pipe_reset_pending = false;
+	/* check if sps bam needs to be reset */
+	if (is_sps_mode(host) && host->sps.reset_bam) {
+		while (retries) {
+			if (!msmsdcc_bam_dml_reset_and_restore(host))
+				break;
+			pr_err("%s: msmsdcc_bam_dml_reset_and_restore returned error. %d attempts left.\n",
+					mmc_hostname(host->mmc), --retries);
+		}
 	}
 
 	spin_lock_irqsave(&host->lock, flags);
@@ -2105,8 +2146,9 @@ msmsdcc_request(struct mmc_host *mmc, struct mmc_request *mrq)
 	/*
 	 * Don't start the request if SDCC is not in proper state to handle it
 	 */
-	if (!host->pwr || !atomic_read(&host->clks_on)
-			|| host->sdcc_irq_disabled) {
+	if (!host->pwr || !atomic_read(&host->clks_on) ||
+			host->sdcc_irq_disabled ||
+			host->sps.reset_bam) {
 		WARN(1, "%s: %s: SDCC is in bad state. don't process"
 		     " new request (CMD%d)\n", mmc_hostname(host->mmc),
 		     __func__, mrq->cmd->opcode);
@@ -2187,6 +2229,18 @@ static inline int msmsdcc_vreg_set_voltage(struct msm_mmc_reg_data *vreg,
 				__func__, vreg->name, min_uV, max_uV, rc);
 		}
 	}
+
+	return rc;
+}
+
+static inline int msmsdcc_vreg_get_voltage(struct msm_mmc_reg_data *vreg)
+{
+	int rc = 0;
+
+	rc = regulator_get_voltage(vreg->reg);
+	if (rc < 0)
+		pr_err("%s: regulator_get_voltage(%s) failed. rc=%d\n",
+			__func__, vreg->name, rc);
 
 	return rc;
 }
@@ -2434,6 +2488,82 @@ enum vdd_io_level {
 	 */
 	VDD_IO_SET_LEVEL,
 };
+
+/*
+ * This function returns the current VDD IO voltage level.
+ * Returns negative value if it fails to read the voltage level
+ * Returns 0 if regulator was disabled or if VDD_IO (and VDD)
+ * regulator were not defined for host.
+ */
+static int msmsdcc_get_vdd_io_vol(struct msmsdcc_host *host)
+{
+	int rc = 0;
+
+	if (host->plat->vreg_data) {
+		struct msm_mmc_reg_data *io_reg =
+			host->plat->vreg_data->vdd_io_data;
+
+		/*
+		 * If vdd_io is not defined, then we can consider that
+		 * IO voltage is same as VDD.
+		 */
+		if (!io_reg)
+			io_reg = host->plat->vreg_data->vdd_data;
+
+		if (io_reg && io_reg->is_enabled)
+			rc = msmsdcc_vreg_get_voltage(io_reg);
+	}
+
+	return rc;
+}
+
+/*
+ * This function updates the IO pad power switch bit in MCI_CLK register
+ * based on currrent IO pad voltage level.
+ * NOTE: This function assumes that host lock was not taken by caller.
+ */
+static void msmsdcc_update_io_pad_pwr_switch(struct msmsdcc_host *host)
+{
+	int rc = 0;
+	unsigned long flags;
+
+	if (!is_io_pad_pwr_switch(host))
+		return;
+
+	rc = msmsdcc_get_vdd_io_vol(host);
+
+	spin_lock_irqsave(&host->lock, flags);
+	/*
+	 * Dual voltage pad is the SDCC's (chipset) functionality and not all
+	 * the SDCC instances support the dual voltage pads.
+	 * For dual-voltage pad (1.8v/3.3v), SW should set IO_PAD_PWR_SWITCH
+	 * bit before using the pads in 1.8V mode.
+	 * For regular, not dual-voltage pads (including eMMC 1.2v/1.8v pads),
+	 * IO_PAD_PWR_SWITCH bit is a don't care.
+	 * But we don't have an option to know (by reading some SDCC register)
+	 * that a particular SDCC instance supports dual voltage pads or not,
+	 * so we simply set the IO_PAD_PWR_SWITCH bit for low voltage IO
+	 * (1.8v/1.2v). For regular (not dual-voltage pads), this bit value
+	 * is anyway ignored.
+	 */
+	if (rc > 0 && rc < 2700000)
+		host->io_pad_pwr_switch = 1;
+	else
+		host->io_pad_pwr_switch = 0;
+
+	if (atomic_read(&host->clks_on)) {
+		if (host->io_pad_pwr_switch)
+			writel_relaxed((readl_relaxed(host->base + MMCICLOCK) |
+					IO_PAD_PWR_SWITCH),
+					host->base + MMCICLOCK);
+		else
+			writel_relaxed((readl_relaxed(host->base + MMCICLOCK) &
+					~IO_PAD_PWR_SWITCH),
+					host->base + MMCICLOCK);
+		msmsdcc_sync_reg_wr(host);
+	}
+	spin_unlock_irqrestore(&host->lock, flags);
+}
 
 static int msmsdcc_set_vdd_io_vol(struct msmsdcc_host *host,
 				  enum vdd_io_level level,
@@ -2736,6 +2866,7 @@ static u32 msmsdcc_setup_pwr(struct msmsdcc_host *host, struct mmc_ios *ios)
 		 * present or during system suspend).
 		 */
 		msmsdcc_set_vdd_io_vol(host, VDD_IO_LOW, 0);
+		msmsdcc_update_io_pad_pwr_switch(host);
 		msmsdcc_setup_pins(host, false);
 		break;
 	case MMC_POWER_UP:
@@ -2744,6 +2875,7 @@ static u32 msmsdcc_setup_pwr(struct msmsdcc_host *host, struct mmc_ios *ios)
 		msmsdcc_cfg_mpm_sdiowakeup(host, SDC_DAT1_ENABLE);
 
 		msmsdcc_set_vdd_io_vol(host, VDD_IO_HIGH, 0);
+		msmsdcc_update_io_pad_pwr_switch(host);
 		msmsdcc_setup_pins(host, true);
 		break;
 	case MMC_POWER_ON:
@@ -3085,8 +3217,21 @@ msmsdcc_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 		/*
 		 * For DDR50 mode, controller needs clock rate to be
 		 * double than what is required on the SD card CLK pin.
+		 *
+		 * Setting DDR timing mode in controller before setting the
+		 * clock rate will make sure that card don't see the double
+		 * clock rate even for very small duration. Some eMMC
+		 * cards seems to lock up if they see clock frequency > 52MHz.
 		 */
 		if (ios->timing == MMC_TIMING_UHS_DDR50) {
+			u32 clk;
+
+			clk = readl_relaxed(host->base + MMCICLOCK);
+			clk &= ~(0x7 << 14); /* clear SELECT_IN field */
+			clk |= (3 << 14); /* set DDR timing mode */
+			writel_relaxed(clk, host->base + MMCICLOCK);
+			msmsdcc_sync_reg_wr(host);
+
 			/*
 			 * Make sure that we don't double the clock if
 			 * doubled clock rate is already set
@@ -3155,10 +3300,6 @@ msmsdcc_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
 
 	/* Select free running MCLK as input clock of cm_dll_sdc4 */
 	clk |= (2 << 23);
-
-	/* Clear IO_PAD_PWR_SWITCH while powering off the card */
-	if (!ios->vdd)
-		host->io_pad_pwr_switch = 0;
 
 	if (host->io_pad_pwr_switch)
 		clk |= IO_PAD_PWR_SWITCH;
@@ -3291,7 +3432,10 @@ static void msmsdcc_print_rpm_info(struct msmsdcc_host *host)
 {
 	struct device *dev = mmc_dev(host->mmc);
 
-	pr_info("%s: RPM: runtime_status=%d, usage_count=%d,"
+	pr_err("%s: PM: sdcc_suspended=%d, pending_resume=%d, sdcc_suspending=%d\n",
+		mmc_hostname(host->mmc), host->sdcc_suspended,
+		host->pending_resume, host->sdcc_suspending);
+	pr_err("%s: RPM: runtime_status=%d, usage_count=%d,"
 		" is_suspended=%d, disable_depth=%d, runtime_error=%d,"
 		" request_pending=%d, request=%d\n",
 		mmc_hostname(host->mmc), dev->power.runtime_status,
@@ -3312,8 +3456,7 @@ static int msmsdcc_enable(struct mmc_host *mmc)
 	if (mmc->card && mmc_card_sdio(mmc->card))
 		goto out;
 
-	if (host->sdcc_suspended && host->pending_resume &&
-			!pm_runtime_suspended(dev)) {
+	if (host->sdcc_suspended && host->pending_resume) {
 		host->pending_resume = false;
 		pm_runtime_get_noresume(dev);
 		rc = msmsdcc_runtime_resume(dev);
@@ -3334,8 +3477,8 @@ static int msmsdcc_enable(struct mmc_host *mmc)
 
 skip_get_sync:
 	if (rc < 0) {
-		pr_info("%s: %s: failed with error %d", mmc_hostname(mmc),
-				__func__, rc);
+		WARN(1, "%s: %s: failed with error %d\n", mmc_hostname(mmc),
+		     __func__, rc);
 		msmsdcc_print_rpm_info(host);
 		return rc;
 	}
@@ -3361,15 +3504,9 @@ static int msmsdcc_disable(struct mmc_host *mmc)
 
 	rc = pm_runtime_put_sync(mmc->parent);
 
-	/*
-	 * Ignore -EAGAIN as that is not fatal, it means that
-	 * either runtime usage count is non-zero or the runtime
-	 * pm itself is disabled or not in proper state to process
-	 * idle notification.
-	 */
-	if (rc < 0 && (rc != -EAGAIN)) {
-		pr_info("%s: %s: failed with error %d", mmc_hostname(mmc),
-				__func__, rc);
+	if (rc < 0) {
+		WARN(1, "%s: %s: failed with error %d\n", mmc_hostname(mmc),
+		     __func__, rc);
 		msmsdcc_print_rpm_info(host);
 		return rc;
 	}
@@ -3446,14 +3583,12 @@ static int msmsdcc_switch_io_voltage(struct mmc_host *mmc,
 	unsigned long flags;
 	int rc = 0;
 
-	spin_lock_irqsave(&host->lock, flags);
-	host->io_pad_pwr_switch = 0;
-	spin_unlock_irqrestore(&host->lock, flags);
-
 	switch (ios->signal_voltage) {
 	case MMC_SIGNAL_VOLTAGE_330:
 		/* Set VDD IO to high voltage range (2.7v - 3.6v) */
 		rc = msmsdcc_set_vdd_io_vol(host, VDD_IO_HIGH, 0);
+		if (!rc)
+			msmsdcc_update_io_pad_pwr_switch(host);
 		goto out;
 	case MMC_SIGNAL_VOLTAGE_180:
 		break;
@@ -3464,6 +3599,8 @@ static int msmsdcc_switch_io_voltage(struct mmc_host *mmc,
 		 * DDR 1.2V mode.
 		 */
 		rc = msmsdcc_set_vdd_io_vol(host, VDD_IO_SET_LEVEL, 1200000);
+		if (!rc)
+			msmsdcc_update_io_pad_pwr_switch(host);
 		goto out;
 	default:
 		/* invalid selection. don't do anything */
@@ -3502,12 +3639,7 @@ static int msmsdcc_switch_io_voltage(struct mmc_host *mmc,
 	if (rc)
 		goto out;
 
-	spin_lock_irqsave(&host->lock, flags);
-	writel_relaxed((readl_relaxed(host->base + MMCICLOCK) |
-			IO_PAD_PWR_SWITCH), host->base + MMCICLOCK);
-	msmsdcc_sync_reg_wr(host);
-	host->io_pad_pwr_switch = 1;
-	spin_unlock_irqrestore(&host->lock, flags);
+	msmsdcc_update_io_pad_pwr_switch(host);
 
 	/* Wait 5 ms for the voltage regulater in the card to become stable. */
 	usleep_range(5000, 5500);
@@ -4477,11 +4609,8 @@ msmsdcc_sps_bam_global_irq_cb(enum sps_callback_case sps_cb_case, void *user)
 	BUG_ON(!is_sps_mode(host));
 
 	if (sps_cb_case == SPS_CALLBACK_BAM_ERROR_IRQ) {
-		/**
-		 * Reset the all endpoints along with reseting the sps device.
-		 */
-		host->sps.pipe_reset_pending = true;
-		host->sps.reset_device = true;
+		/* Reset all endpoints along with resetting bam. */
+		host->sps.reset_bam = true;
 
 		pr_err("%s: BAM Global ERROR IRQ happened\n",
 			mmc_hostname(host->mmc));
@@ -4752,6 +4881,63 @@ store_idle_timeout(struct device *dev, struct device_attribute *attr,
 	return count;
 }
 
+static inline void set_auto_cmd_setting(struct device *dev,
+					 const char *buf,
+					 bool is_cmd19)
+{
+	struct mmc_host *mmc = dev_get_drvdata(dev);
+	struct msmsdcc_host *host = mmc_priv(mmc);
+	unsigned int long flags;
+	int temp;
+
+	if (!kstrtou32(buf, 0, &temp)) {
+		spin_lock_irqsave(&host->lock, flags);
+		if (is_cmd19)
+			host->en_auto_cmd19 = !!temp;
+		else
+			host->en_auto_cmd21 = !!temp;
+		spin_unlock_irqrestore(&host->lock, flags);
+	}
+}
+
+static ssize_t
+show_enable_auto_cmd19(struct device *dev, struct device_attribute *attr,
+		       char *buf)
+{
+	struct mmc_host *mmc = dev_get_drvdata(dev);
+	struct msmsdcc_host *host = mmc_priv(mmc);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", host->en_auto_cmd19);
+}
+
+static ssize_t
+store_enable_auto_cmd19(struct device *dev, struct device_attribute *attr,
+			const char *buf, size_t count)
+{
+	set_auto_cmd_setting(dev, buf, true);
+
+	return count;
+}
+
+static ssize_t
+show_enable_auto_cmd21(struct device *dev, struct device_attribute *attr,
+		       char *buf)
+{
+	struct mmc_host *mmc = dev_get_drvdata(dev);
+	struct msmsdcc_host *host = mmc_priv(mmc);
+
+	return snprintf(buf, PAGE_SIZE, "%d\n", host->en_auto_cmd21);
+}
+
+static ssize_t
+store_enable_auto_cmd21(struct device *dev, struct device_attribute *attr,
+			const char *buf, size_t count)
+{
+	set_auto_cmd_setting(dev, buf, false);
+
+	return count;
+}
+
 #ifdef CONFIG_HAS_EARLYSUSPEND
 static void msmsdcc_early_suspend(struct early_suspend *h)
 {
@@ -4787,10 +4973,10 @@ static void msmsdcc_print_regs(const char *name, void __iomem *base,
 	if (!base)
 		return;
 
-	pr_info("===== %s: Register Dumps @phys_base=0x%x, @virt_base=0x%x"
+	pr_err("===== %s: Register Dumps @phys_base=0x%x, @virt_base=0x%x"
 		" =====\n", name, phys_base, (u32)base);
 	for (i = 0; i < no_of_regs; i = i + 4) {
-		pr_info("Reg=0x%.2x: 0x%.8x, 0x%.8x, 0x%.8x, 0x%.8x\n", i*4,
+		pr_err("Reg=0x%.2x: 0x%.8x, 0x%.8x, 0x%.8x, 0x%.8x\n", i*4,
 			(u32)readl_relaxed(base + i*4),
 			(u32)readl_relaxed(base + ((i+1)*4)),
 			(u32)readl_relaxed(base + ((i+2)*4)),
@@ -4801,25 +4987,29 @@ static void msmsdcc_print_regs(const char *name, void __iomem *base,
 static void msmsdcc_dump_sdcc_state(struct msmsdcc_host *host)
 {
 	/* Dump current state of SDCC clocks, power and irq */
-	pr_info("%s: SDCC PWR is %s\n", mmc_hostname(host->mmc),
+	pr_err("%s: SDCC PWR is %s\n", mmc_hostname(host->mmc),
 		(host->pwr ? "ON" : "OFF"));
-	pr_info("%s: SDCC clks are %s, MCLK rate=%d\n",
+	pr_err("%s: SDCC clks are %s, MCLK rate=%d\n",
 		mmc_hostname(host->mmc),
 		(atomic_read(&host->clks_on) ? "ON" : "OFF"),
 		(u32)clk_get_rate(host->clk));
-	pr_info("%s: SDCC irq is %s\n", mmc_hostname(host->mmc),
+	pr_err("%s: SDCC irq is %s\n", mmc_hostname(host->mmc),
 		(host->sdcc_irq_disabled ? "disabled" : "enabled"));
 
 	/* Now dump SDCC registers. Don't print FIFO registers */
-	if (atomic_read(&host->clks_on))
+	if (atomic_read(&host->clks_on)) {
 		msmsdcc_print_regs("SDCC-CORE", host->base,
 				   host->core_memres->start, 28);
+		pr_err("%s: MCI_TEST_INPUT = 0x%.8x\n",
+			mmc_hostname(host->mmc),
+			readl_relaxed(host->base + MCI_TEST_INPUT));
+	}
 
 	if (host->curr.data) {
 		if (!msmsdcc_is_dma_possible(host, host->curr.data))
-			pr_info("%s: PIO mode\n", mmc_hostname(host->mmc));
+			pr_err("%s: PIO mode\n", mmc_hostname(host->mmc));
 		else if (is_dma_mode(host))
-			pr_info("%s: ADM mode: busy=%d, chnl=%d, crci=%d\n",
+			pr_err("%s: ADM mode: busy=%d, chnl=%d, crci=%d\n",
 				mmc_hostname(host->mmc), host->dma.busy,
 				host->dma.channel, host->dma.crci);
 		else if (is_sps_mode(host)) {
@@ -4827,16 +5017,20 @@ static void msmsdcc_dump_sdcc_state(struct msmsdcc_host *host)
 				msmsdcc_print_regs("SDCC-DML", host->dml_base,
 						   host->dml_memres->start,
 						   16);
-			pr_info("%s: SPS mode: busy=%d\n",
+			pr_err("%s: SPS mode: busy=%d\n",
 				mmc_hostname(host->mmc), host->sps.busy);
 		}
 
-		pr_info("%s: xfer_size=%d, data_xfered=%d, xfer_remain=%d\n",
+		pr_err("%s: xfer_size=%d, data_xfered=%d, xfer_remain=%d\n",
 			mmc_hostname(host->mmc), host->curr.xfer_size,
 			host->curr.data_xfered, host->curr.xfer_remain);
 	}
 
-	pr_info("%s: got_dataend=%d, prog_enable=%d,"
+	if (host->sps.reset_bam)
+		pr_err("%s: SPS BAM reset failed: sps reset_bam=%d\n",
+			mmc_hostname(host->mmc), host->sps.reset_bam);
+
+	pr_err("%s: got_dataend=%d, prog_enable=%d,"
 		" wait_for_auto_prog_done=%d, got_auto_prog_done=%d,"
 		" req_tout_ms=%d\n", mmc_hostname(host->mmc),
 		host->curr.got_dataend, host->prog_enable,
@@ -5891,8 +6085,42 @@ msmsdcc_probe(struct platform_device *pdev)
 	ret = device_create_file(&pdev->dev, &host->idle_timeout);
 	if (ret)
 		goto remove_polling_file;
+
+	if (!is_auto_cmd19(host))
+		goto add_auto_cmd21_atrr;
+
+	/* Sysfs entry for AUTO CMD19 control */
+	host->auto_cmd19_attr.show = show_enable_auto_cmd19;
+	host->auto_cmd19_attr.store = store_enable_auto_cmd19;
+	sysfs_attr_init(&host->auto_cmd19_attr.attr);
+	host->auto_cmd19_attr.attr.name = "enable_auto_cmd19";
+	host->auto_cmd19_attr.attr.mode = S_IRUGO | S_IWUSR;
+	ret = device_create_file(&pdev->dev, &host->auto_cmd19_attr);
+	if (ret)
+		goto remove_idle_timeout_file;
+
+ add_auto_cmd21_atrr:
+	if (!is_auto_cmd21(host))
+		goto exit;
+
+	/* Sysfs entry for AUTO CMD21 control */
+	host->auto_cmd21_attr.show = show_enable_auto_cmd21;
+	host->auto_cmd21_attr.store = store_enable_auto_cmd21;
+	sysfs_attr_init(&host->auto_cmd21_attr.attr);
+	host->auto_cmd21_attr.attr.name = "enable_auto_cmd21";
+	host->auto_cmd21_attr.attr.mode = S_IRUGO | S_IWUSR;
+	ret = device_create_file(&pdev->dev, &host->auto_cmd21_attr);
+	if (ret)
+		goto remove_auto_cmd19_attr_file;
+
+ exit:
 	return 0;
 
+ remove_auto_cmd19_attr_file:
+	if (is_auto_cmd19(host))
+		device_remove_file(&pdev->dev, &host->auto_cmd19_attr);
+ remove_idle_timeout_file:
+	device_remove_file(&pdev->dev, &host->idle_timeout);
  remove_polling_file:
 	if (!plat->status_irq)
 		device_remove_file(&pdev->dev, &host->polling);
@@ -5973,6 +6201,10 @@ static int msmsdcc_remove(struct platform_device *pdev)
 	DBG(host, "Removing SDCC device = %d\n", pdev->id);
 	plat = host->plat;
 
+	if (is_auto_cmd19(host))
+		device_remove_file(&pdev->dev, &host->auto_cmd19_attr);
+	if (is_auto_cmd21(host))
+		device_remove_file(&pdev->dev, &host->auto_cmd21_attr);
 	device_remove_file(&pdev->dev, &host->max_bus_bw);
 	if (!plat->status_irq)
 		device_remove_file(&pdev->dev, &host->polling);
@@ -6261,6 +6493,7 @@ msmsdcc_runtime_resume(struct device *dev)
 
 		wake_unlock(&host->sdio_suspend_wlock);
 	}
+	host->pending_resume = false;
 	pr_debug("%s: %s: end\n", mmc_hostname(mmc), __func__);
 	return 0;
 }
@@ -6333,7 +6566,13 @@ static int msmsdcc_pm_resume(struct device *dev)
 
 	if (mmc->card && mmc_card_sdio(mmc->card))
 		rc = msmsdcc_runtime_resume(dev);
-	else
+	/*
+	 * As runtime PM is enabled before calling the device's platform resume
+	 * callback, we use the pm_runtime_suspended API to know if SDCC is
+	 * really runtime suspended or not and set the pending_resume flag only
+	 * if its not runtime suspended.
+	 */
+	else if (!pm_runtime_suspended(dev))
 		host->pending_resume = true;
 
 	if (host->plat->status_irq) {

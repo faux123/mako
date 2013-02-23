@@ -24,6 +24,7 @@
 #include "kgsl_mmu.h"
 #include "kgsl_device.h"
 #include "kgsl_sharedmem.h"
+#include "adreno.h"
 
 #define KGSL_MMU_ALIGN_SHIFT    13
 #define KGSL_MMU_ALIGN_MASK     (~((1 << KGSL_MMU_ALIGN_SHIFT) - 1))
@@ -319,7 +320,7 @@ unsigned int kgsl_mmu_get_ptsize(void)
 	if (KGSL_MMU_TYPE_GPU == kgsl_mmu_type)
 		return CONFIG_MSM_KGSL_PAGE_TABLE_SIZE;
 	else if (KGSL_MMU_TYPE_IOMMU == kgsl_mmu_type)
-		return SZ_2G;
+		return SZ_2G - KGSL_PAGETABLE_BASE;
 	else
 		return 0;
 }
@@ -546,6 +547,12 @@ void kgsl_setstate(struct kgsl_mmu *mmu, unsigned int context_id,
 			uint32_t flags)
 {
 	struct kgsl_device *device = mmu->device;
+	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
+
+	if (!(flags & (KGSL_MMUFLAGS_TLBFLUSH | KGSL_MMUFLAGS_PTUPDATE))
+		&& !adreno_is_a2xx(adreno_dev))
+		return;
+
 	if (KGSL_MMU_TYPE_NONE == kgsl_mmu_type)
 		return;
 	else if (device->ftbl->setstate)

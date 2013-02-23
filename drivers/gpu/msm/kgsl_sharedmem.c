@@ -561,7 +561,8 @@ _kgsl_sharedmem_page_alloc(struct kgsl_memdesc *memdesc,
 		 * range ourselves (see below)
 		 */
 
-		pages[i] = alloc_page(GFP_KERNEL | __GFP_HIGHMEM);
+		pages[i] = alloc_page(GFP_KERNEL | __GFP_HIGHMEM |
+			__GFP_NOWARN | __GFP_NORETRY);
 		if (pages[i] == NULL) {
 			ret = -ENOMEM;
 			memdesc->sglen = i;
@@ -681,7 +682,8 @@ kgsl_sharedmem_page_alloc_user(struct kgsl_memdesc *memdesc,
 {
 	unsigned int protflags;
 
-	BUG_ON(size == 0);
+	if (size == 0)
+		return -EINVAL;
 
 	protflags = GSL_PT_PAGE_RV;
 	if (!(flags & KGSL_MEMFLAGS_GPUREADONLY))

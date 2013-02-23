@@ -2843,8 +2843,7 @@ static void task_waking_fair(struct task_struct *p)
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 /*
- * effective_load() calculates the runnable load average change as seen from
- * the root_task_group
+ * effective_load() calculates the load change as seen from the root_task_group
  *
  * Adding load to a group doesn't make a group heavier, but can cause movement
  * of group shares between cpus. Assuming the shares were perfectly aligned one
@@ -2892,17 +2891,13 @@ static void task_waking_fair(struct task_struct *p)
  * Therefore the effective change in loads on CPU 0 would be 5/56 (3/8 - 2/7)
  * times the weight of the group. The effect on CPU 1 would be -4/56 (4/8 -
  * 4/7) times the weight of the group.
- *
- * After get effective_load of the load moving, will multiple the cpu own
- * cfs_rq's runnable contrib of root_task_group.
  */
 static long effective_load(struct task_group *tg, int cpu, long wl, long wg)
 {
 	struct sched_entity *se = tg->se[cpu];
 
 	if (!tg->parent)	/* the trivial, non-cgroup case */
-		return wl * tg->cfs_rq[cpu]->tg_runnable_contrib
-						>> NICE_0_SHIFT;
+		return wl;
 
 	for_each_sched_entity(se) {
 		long w, W;
@@ -2950,7 +2945,7 @@ static long effective_load(struct task_group *tg, int cpu, long wl, long wg)
 		wg = 0;
 	}
 
-	return wl * tg->cfs_rq[cpu]->tg_runnable_contrib >> NICE_0_SHIFT;
+	return wl;
 }
 #else
 

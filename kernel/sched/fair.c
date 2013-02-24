@@ -1761,26 +1761,25 @@ static struct sched_entity *pick_next_entity(struct cfs_rq *cfs_rq)
 	struct sched_entity *left = se;
 
 	/*
-	 * Avoid running the skip buddy, if running something else can
-	 * be done without getting too unfair.
+	 * Someone really wants next to run. If it's not unfair, run it.
 	 */
-	if (cfs_rq->skip == se) {
-		struct sched_entity *second = __pick_next_entity(se);
+	if (cfs_rq->next && wakeup_preempt_entity(cfs_rq->next, left) < 1) {
+		se = cfs_rq->next;
+	} else if (cfs_rq->last && wakeup_preempt_entity(cfs_rq->last, left) < 1) {
+		/*
+		 * Prefer last buddy, try to return the CPU to a preempted
+		 * task.
+		 */
+		se = cfs_rq->last;
+	} else if (cfs_rq->skip == left) {
+		/*
+		 * Avoid running the skip buddy, if running something else
+		 * can be done without getting too unfair.
+		 */
+		struct sched_entity *second = __pick_next_entity(left);
 		if (second && wakeup_preempt_entity(second, left) < 1)
 			se = second;
 	}
-
-	/*
-	 * Prefer last buddy, try to return the CPU to a preempted task.
-	 */
-	if (cfs_rq->last && wakeup_preempt_entity(cfs_rq->last, left) < 1)
-		se = cfs_rq->last;
-
-	/*
-	 * Someone really wants this to run. If it's not unfair, run it.
-	 */
-	if (cfs_rq->next && wakeup_preempt_entity(cfs_rq->next, left) < 1)
-		se = cfs_rq->next;
 
 	clear_buddies(cfs_rq, se);
 

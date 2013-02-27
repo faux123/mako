@@ -100,16 +100,21 @@ int tpa2028d_poweron(void)
 	int fail = 0;
 	char agc_compression_rate = amp_data->pdata->agc_compression_rate;
 	char agc_output_limiter_disable = amp_data->pdata->agc_output_limiter_disable;
-	char agc_fixed_gain = amp_data->pdata->agc_fixed_gain;
+	char agc_fixed_gain = amp_data->pdata->agc_fixed_gain & 0x3F;
+	char ATK_time = amp_data->pdata->ATK_time & 0x3F;
+	char REL_time = amp_data->pdata->REL_time & 0x3F;
+	char Hold_time = amp_data->pdata->Hold_time & 0x3F;
+	char Output_limit_level = amp_data->pdata->Output_limit_level & 0x1F;
 
 	agc_output_limiter_disable = (agc_output_limiter_disable<<7);
 
 	fail |= WriteI2C(IC_CONTROL, 0xE3); /*Tuen On*/
-	fail |= WriteI2C(AGC_ATTACK_CONTROL, 0x05); /*Tuen On*/
-	fail |= WriteI2C(AGC_RELEASE_CONTROL, 0x0B); /*Tuen On*/
-	fail |= WriteI2C(AGC_HOLD_TIME_CONTROL, 0x00); /*Tuen On*/
+	fail |= WriteI2C(AGC_ATTACK_CONTROL, ATK_time); /*Tuen On*/
+	fail |= WriteI2C(AGC_RELEASE_CONTROL, REL_time); /*Tuen On*/
+	fail |= WriteI2C(AGC_HOLD_TIME_CONTROL, Hold_time); /*Tuen On*/
 	fail |= WriteI2C(AGC_FIXED_GAIN_CONTROL, agc_fixed_gain); /*Tuen On*/
-	fail |= WriteI2C(AGC1_CONTROL, 0x3A|agc_output_limiter_disable); /*Tuen On*/
+	fail |= WriteI2C(AGC1_CONTROL,
+		Output_limit_level|agc_output_limiter_disable); /*Tuen On*/
 	fail |= WriteI2C(AGC2_CONTROL, 0xC0|agc_compression_rate); /*Tuen On*/
 	fail |= WriteI2C(IC_CONTROL, 0xC3); /*Tuen On*/
 
@@ -235,10 +240,118 @@ tpa2028d_fixed_gain_show(struct device *dev, struct device_attribute *attr,   ch
 	return sprintf(buf, "fixed_gain : %x, pdata->agc_fixed_gain : %d\n", val, pdata->agc_fixed_gain);
 }
 
+static ssize_t
+tpa2028d_ATK_time_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+        struct audio_amp_platform_data *pdata = amp_data->pdata;
+        int val;
+
+        if (sscanf(buf, "%d", &val) != 1)
+                return -EINVAL;
+
+        pdata->ATK_time = val;
+        return count;
+}
+
+static ssize_t
+tpa2028d_ATK_time_show(struct device *dev, struct device_attribute *attr,   char *buf)
+{
+        struct audio_amp_platform_data *pdata = amp_data->pdata;
+        char val=0;
+
+        ReadI2C(AGC_ATTACK_CONTROL, &val);
+
+        D("[tpa2028d_ATK_time_show] val : %x \n",val);
+
+        return sprintf(buf, "ATK_time : %x, pdata->ATK_time : %d\n", val, pdata->ATK_time);
+}
+
+static ssize_t
+tpa2028d_REL_time_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+        struct audio_amp_platform_data *pdata = amp_data->pdata;
+        int val;
+
+        if (sscanf(buf, "%d", &val) != 1)
+                return -EINVAL;
+
+        pdata->REL_time = val;
+        return count;
+}
+
+static ssize_t
+tpa2028d_REL_time_show(struct device *dev, struct device_attribute *attr,   char *buf)
+{
+        struct audio_amp_platform_data *pdata = amp_data->pdata;
+        char val=0;
+
+        ReadI2C(AGC_RELEASE_CONTROL, &val);
+
+        D("[tpa2028d_REL_time_show] val : %x \n",val);
+
+        return sprintf(buf, "REL_time : %x, pdata->REL_time : %d\n", val, pdata->REL_time);
+}
+
+static ssize_t
+tpa2028d_Hold_time_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+        struct audio_amp_platform_data *pdata = amp_data->pdata;
+        int val;
+
+        if (sscanf(buf, "%d", &val) != 1)
+                return -EINVAL;
+
+        pdata->Hold_time = val;
+        return count;
+}
+
+static ssize_t
+tpa2028d_Hold_time_show(struct device *dev, struct device_attribute *attr,   char *buf)
+{
+        struct audio_amp_platform_data *pdata = amp_data->pdata;
+        char val=0;
+
+        ReadI2C(AGC_HOLD_TIME_CONTROL, &val);
+
+        D("[tpa2028d_Hold_time_show] val : %x \n",val);
+
+        return sprintf(buf, "Hold_time : %x, pdata->Hold_time : %d\n", val, pdata->Hold_time);
+}
+
+static ssize_t
+tpa2028d_Output_limit_level_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
+{
+        struct audio_amp_platform_data *pdata = amp_data->pdata;
+        int val;
+
+        if (sscanf(buf, "%d", &val) != 1)
+                return -EINVAL;
+
+        pdata->Output_limit_level = val;
+        return count;
+}
+
+static ssize_t
+tpa2028d_Output_limit_level_show(struct device *dev, struct device_attribute *attr,   char *buf)
+{
+        struct audio_amp_platform_data *pdata = amp_data->pdata;
+        char val=0;
+
+        ReadI2C(AGC1_CONTROL, &val);
+
+        D("[tpa2028d_Output_limit_level_show] val : %x \n",val);
+
+        return sprintf(buf, "Output_limit_level : %x, pdata->Output_limit_level : %d\n", val, pdata->Output_limit_level);
+}
+
 static struct device_attribute tpa2028d_device_attrs[] = {
 	__ATTR(comp_rate,  S_IRUGO | S_IWUSR, tpa2028d_comp_rate_show, tpa2028d_comp_rate_store),
 	__ATTR(out_lim, S_IRUGO | S_IWUSR, tpa2028d_out_lim_show, tpa2028d_out_lim_store),
 	__ATTR(fixed_gain, S_IRUGO | S_IWUSR, tpa2028d_fixed_gain_show, tpa2028d_fixed_gain_store),
+	__ATTR(ATK_time, S_IRUGO | S_IWUSR, tpa2028d_ATK_time_show, tpa2028d_ATK_time_store),
+	__ATTR(REL_time, S_IRUGO | S_IWUSR, tpa2028d_REL_time_show, tpa2028d_REL_time_store),
+	__ATTR(Hold_time, S_IRUGO | S_IWUSR, tpa2028d_Hold_time_show, tpa2028d_Hold_time_store),
+	__ATTR(Output_limit_level, S_IRUGO | S_IWUSR, tpa2028d_Output_limit_level_show, tpa2028d_Output_limit_level_store),
 };
 
 static int tpa2028d_amp_probe(struct i2c_client *client,

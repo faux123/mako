@@ -872,13 +872,13 @@ static inline long calc_tg_weight(struct task_group *tg, struct cfs_rq *cfs_rq)
 	long tg_weight;
 
 	/*
-	 * Use this CPU's actual weight instead of the last load_contribution
-	 * to gain a more accurate current total weight. See
-	 * update_cfs_rq_load_contribution().
+	 * Use this CPU's actual load instead of the last load_contribution
+	 * to gain a more accurate current total load. See
+	 * __update_cfs_rq_tg_load_contrib().
 	 */
 	tg_weight = atomic64_read(&tg->load_avg);
 	tg_weight -= cfs_rq->tg_load_contrib;
-	tg_weight += cfs_rq->load.weight;
+	tg_weight += cfs_rq->runnable_load_avg + cfs_rq->blocked_load_avg;
 
 	return tg_weight;
 }
@@ -888,7 +888,7 @@ static long calc_cfs_shares(struct cfs_rq *cfs_rq, struct task_group *tg)
 	long tg_weight, load, shares;
 
 	tg_weight = calc_tg_weight(tg, cfs_rq);
-	load = cfs_rq->load.weight;
+	load = cfs_rq->runnable_load_avg + cfs_rq->blocked_load_avg;
 
 	shares = (tg->shares * load);
 	if (tg_weight)

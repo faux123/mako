@@ -5,6 +5,7 @@
  *            (C)  2003 Venkatesh Pallipadi <venkatesh.pallipadi@intel.com>.
  *                      Jun Nakajima <jun.nakajima@intel.com>
  *            (C)  2012 Paul Reioux <reioux@gmail.com>
+ *            (C)  2013 Paul Reioux <reioux@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -31,7 +32,8 @@
 #endif
 #include <linux/rq_stats.h>
 
-#define INTELLIDEMAND_VERSION	4.1
+#define INTELLIDEMAND_MAJOR_VERSION	4
+#define INTELLIDEMAND_MINOR_VERSION	2
 
 /*
  * dbs is used in this file as a shortform for demandbased switching
@@ -1337,6 +1339,7 @@ static void do_dbs_timer(struct work_struct *work)
 		if (rq_persist_count > 0)
 			rq_persist_count--;
 
+#ifdef CONFIG_CPUFREQ_LIMIT_MAX_FREQ
 	if (rq_persist_count > 3) {
 		lmf_browsing_state = false;
 		rq_persist_count = 0;
@@ -1345,7 +1348,6 @@ static void do_dbs_timer(struct work_struct *work)
 		lmf_browsing_state = true;
 	//pr_info("Run Queue Average: %u\n", rq_info.rq_avg);
 
-#ifdef CONFIG_CPUFREQ_LIMIT_MAX_FREQ
 	if (!lmf_browsing_state && lmf_screen_state)
 	{
 		if (cpu == BOOT_CPU)

@@ -1643,6 +1643,9 @@ static void dbs_chown(void)
 	int ret;
 
 	ret =
+	sys_chown("/sys/devices/system/cpu/cpufreq/intellidemand/sampling_rate",
+		low2highuid(AID_SYSTEM), low2highgid(0));
+	ret =
 	sys_chown("/sys/devices/system/cpu/cpufreq/intellidemand/boostpulse",
 		low2highuid(AID_SYSTEM), low2highgid(0));
 	if (ret)

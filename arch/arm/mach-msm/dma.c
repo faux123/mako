@@ -189,7 +189,7 @@ static struct msm_dmov_conf dmov_conf[] = {
 		.list_lock = __SPIN_LOCK_UNLOCKED(dmov_list_lock),
 		.clk_ctl = CLK_DIS,
 		.work = __DELAYED_WORK_INITIALIZER(dmov_conf[0].work,
-				msm_dmov_clock_work),
+				msm_dmov_clock_work, 0),
 	}
 };
 #endif

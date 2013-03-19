@@ -78,7 +78,6 @@ again:
 	else if (unlikely(err))
 		return err;
 
-	*id = *id & MAX_IDR_MASK;
 	return 0;
 }
 

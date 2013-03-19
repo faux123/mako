@@ -524,9 +524,6 @@ int slim_add_numbered_controller(struct slim_controller *ctrl)
 	int	id;
 	int	status;
 
-	if (ctrl->nr & ~MAX_IDR_MASK)
-		return -EINVAL;
-
 retry:
 	if (idr_pre_get(&ctrl_idr, GFP_KERNEL) == 0)
 		return -ENOMEM;

@@ -524,7 +524,7 @@ int slim_add_numbered_controller(struct slim_controller *ctrl)
 	int	id;
 	int	status;
 
-	if (ctrl->nr & ~MAX_ID_MASK)
+	if (ctrl->nr & ~MAX_IDR_MASK)
 		return -EINVAL;
 
 retry:

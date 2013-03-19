@@ -550,6 +550,33 @@ void resched_cpu(int cpu)
 
 #ifdef CONFIG_NO_HZ
 /*
+ * In the semi idle case, use the nearest busy cpu for migrating timers
+ * from an idle cpu.  This is good for power-savings.
+ *
+ * We don't do similar optimization for completely idle system, as
+ * selecting an idle cpu will add more delays to the timers than intended
+ * (as that cpu's timer base may not be uptodate wrt jiffies etc).
+ */
+int get_nohz_timer_target(void)
+{
+	int cpu = smp_processor_id();
+	int i;
+	struct sched_domain *sd;
+
+	rcu_read_lock();
+	for_each_domain(cpu, sd) {
+		for_each_cpu(i, sched_domain_span(sd)) {
+			if (!idle_cpu(i)) {
+				cpu = i;
+				goto unlock;
+			}
+		}
+	}
+unlock:
+	rcu_read_unlock();
+	return cpu;
+}
+/*
  * When add_timer_on() enqueues a timer into the timer wheel of an
  * idle CPU then this timer might expire before the next timer event
  * which is scheduled to wake up that CPU. In case of a completely
@@ -618,42 +645,6 @@ void sched_avg_update(struct rq *rq)
 		rq->age_stamp += period;
 		rq->rt_avg /= 2;
 	}
-}
-
-/*
- * This routine returns the nearest non-idle cpu. It accepts a bitwise OR of
- * SD_* flags present in linux/sched.h. If the local CPU isn't idle, it is
- * returned back. If it is idle, then we must look for another CPU which have
- * all the flags passed as argument as set.
- */
-int sched_select_cpu(unsigned int sd_flags)
-{
-	struct sched_domain *sd;
-	int cpu = smp_processor_id();
-	int i;
-
-	/* If Current cpu isn't idle, don't migrate anything */
-	if (!idle_cpu(cpu))
-		return cpu;
-
-	rcu_read_lock();
-	for_each_domain(cpu, sd) {
-		 /* If sd doesnt' have sd_flags set skip sd. */
-		if ((sd->flags & sd_flags) != sd_flags)
-			continue;
-
-		for_each_cpu(i, sched_domain_span(sd)) {
-			if (i == cpu)
-				continue;
-			if (!idle_cpu(i)) {
-				cpu = i;
-				goto unlock;
-			}
-		}
-	}
-unlock:
-	rcu_read_unlock();
-	return cpu;
 }
 
 #else /* !CONFIG_SMP */

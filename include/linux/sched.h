@@ -271,31 +271,14 @@ extern void init_idle_bootup_task(struct task_struct *idle);
 
 extern int runqueue_is_locked(int cpu);
 
-#ifdef CONFIG_SMP
-extern int sched_select_cpu(unsigned int sd_flags);
-
-#ifdef CONFIG_NO_HZ
+#if defined(CONFIG_SMP) && defined(CONFIG_NO_HZ)
 extern void select_nohz_load_balancer(int stop_tick);
 extern void set_cpu_sd_state_idle(void);
-/*
- * In the semi idle case, use the nearest busy cpu for migrating timers
- * from an idle cpu.  This is good for power-savings.
- *
- * We don't do similar optimization for completely idle system, as
- * selecting an idle cpu will add more delays to the timers than intended
- * (as that cpu's timer base may not be uptodate wrt jiffies etc).
- */
-#define get_nohz_timer_target() sched_select_cpu(0)
+extern int get_nohz_timer_target(void);
 #else
 static inline void select_nohz_load_balancer(int stop_tick) { }
 static inline void set_cpu_sd_state_idle(void) { }
-
-static inline int sched_select_cpu(unsigned int sd_flags)
-{
-       return raw_smp_processor_id();
-}
 #endif
-#endif /* CONFIG_SMP */
 
 /*
  * Only dump TASK_* tasks. (0 for all tasks)

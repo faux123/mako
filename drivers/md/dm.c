@@ -328,7 +328,7 @@ static void __exit dm_exit(void)
 	/*
 	 * Should be empty by this point.
 	 */
-	__idr_remove_all(&_minor_idr);
+	idr_remove_all(&_minor_idr);
 	idr_destroy(&_minor_idr);
 }
 

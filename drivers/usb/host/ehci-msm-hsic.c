@@ -1131,7 +1131,7 @@ static int ehci_hsic_bus_resume(struct usb_hcd *hcd)
 static void ehci_msm_set_autosuspend_delay(struct usb_device *dev)
 {
        if (!dev->parent) /*for root hub no delay*/
-               pm_runtime_set_autosuspend_delay(&dev->dev, 0);
+               pm_runtime_set_autosuspend_delay(&dev->dev, 50);
        else
                pm_runtime_set_autosuspend_delay(&dev->dev, 200);
 }
@@ -1533,7 +1533,7 @@ static int __devinit ehci_hsic_msm_probe(struct platform_device *pdev)
 		return  -ENOMEM;
 	}
 
-	hcd_to_bus(hcd)->skip_resume = true;
+	hcd_to_bus(hcd)->skip_resume = false;
 
 	hcd->irq = platform_get_irq(pdev, 0);
 	if (hcd->irq < 0) {

@@ -339,11 +339,9 @@ int rmnet_usb_ctrl_start_rx(struct rmnet_ctrl_dev *dev)
 
 int rmnet_usb_ctrl_suspend(struct rmnet_ctrl_dev *dev)
 {
-	if (work_busy(&dev->get_encap_work))
-			return -EBUSY;
+	if (!flush_work_sync(&dev->get_encap_work))
+		usb_kill_anchored_urbs(&dev->rx_submitted);
 
-	usb_kill_anchored_urbs(&dev->rx_submitted);
-	
 	return 0;
 }
 static int rmnet_usb_ctrl_alloc_rx(struct rmnet_ctrl_dev *dev)

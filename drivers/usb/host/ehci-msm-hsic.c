@@ -1131,9 +1131,9 @@ static int ehci_hsic_bus_resume(struct usb_hcd *hcd)
 static void ehci_msm_set_autosuspend_delay(struct usb_device *dev)
 {
        if (!dev->parent) /*for root hub no delay*/
-               pm_runtime_set_autosuspend_delay(&dev->dev, 160);
+               pm_runtime_set_autosuspend_delay(&dev->dev, 0);
        else
-               pm_runtime_set_autosuspend_delay(&dev->dev, 800);
+               pm_runtime_set_autosuspend_delay(&dev->dev, 200);
 }
 
 static struct hc_driver msm_hsic_driver = {

@@ -991,10 +991,10 @@ static struct resource resources_hsic_host[] = {
 		.flags	= IORESOURCE_IRQ,
 	},
 	{
-		.start	= MSM_GPIO_TO_INT(47),
-		.end	= MSM_GPIO_TO_INT(47),
+		.start	= 47,
+		.end	= 47,
 		.name	= "wakeup",
-		.flags	= IORESOURCE_IRQ,
+		.flags	= IORESOURCE_IO,
 	},
 };
 

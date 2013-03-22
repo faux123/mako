@@ -694,7 +694,7 @@ ctrl_bridge_probe(struct usb_interface *ifc, struct usb_host_endpoint *int_in,
 	if (!dev->inturb) {
 		dev_err(&ifc->dev, "%s: error allocating int urb\n", __func__);
 		retval = -ENOMEM;
-		goto pdev_del;
+		goto pdev_put;
 	}
 
 	wMaxPacketSize = le16_to_cpu(ep->wMaxPacketSize);
@@ -746,12 +746,25 @@ ctrl_bridge_probe(struct usb_interface *ifc, struct usb_host_endpoint *int_in,
 		dev->intf->cur_altsetting->desc.bInterfaceNumber;
 	dev->in_ctlreq->wLength = cpu_to_le16(DEFAULT_READ_URB_LENGTH);
 
-	platform_device_add(dev->pdev);
+	retval = platform_device_add(dev->pdev);
+	if (retval) {
+		dev_err(&ifc->dev, "%s:fail to add pdev\n", __func__);
+		goto free_ctrlreq;
+	}
+
+	retval = ctrl_bridge_start_read(dev, GFP_KERNEL);
+	if (retval) {
+		dev_err(&ifc->dev, "%s:fail to start reading\n", __func__);
+		goto pdev_del;
+	}
 
 	ch_id++;
+	return 0;
 
-	return ctrl_bridge_start_read(dev, GFP_KERNEL);
-
+pdev_del:
+	platform_device_del(dev->pdev);
+free_ctrlreq:
+	kfree(dev->in_ctlreq);
 free_rbuf:
 	kfree(dev->readbuf);
 free_rurb:
@@ -760,8 +773,8 @@ free_intbuf:
 	kfree(dev->intbuf);
 free_inturb:
 	usb_free_urb(dev->inturb);
-pdev_del:
-	platform_device_unregister(dev->pdev);
+pdev_put:
+	platform_device_put(dev->pdev);
 
 	return retval;
 }

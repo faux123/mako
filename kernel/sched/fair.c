@@ -3150,16 +3150,13 @@ static int select_idle_sibling(struct task_struct *p, int target)
 static bool is_buddy_busy(int cpu)
 {
 	struct rq *rq = cpu_rq(cpu);
-	u32 sum = rq->avg.runnable_avg_sum;
-	u32 period = rq->avg.runnable_avg_period;
-
-	sum = min(sum, period);
 
 	/*
 	 * A busy buddy is a CPU with a high load or a small load with a lot of
 	 * running tasks.
 	 */
-	return ((sum << rq->nr_running) > period);
+	return ((rq->avg.runnable_avg_sum << rq->nr_running) >
+			rq->avg.runnable_avg_period);
 }
 
 static bool is_light_task(struct task_struct *p)

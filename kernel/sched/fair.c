@@ -5319,6 +5319,7 @@ static int find_new_ilb(int cpu)
 	int ilb = cpumask_first(nohz.idle_cpus_mask);
 	struct sched_group *ilbg;
 	struct sched_domain *sd;
+	int buddy = per_cpu(sd_pack_buddy, call_cpu);
 
 	/*
 	 * Have idle load balancer selection from semi-idle packages only
@@ -5354,6 +5355,21 @@ unlock:
 	rcu_read_unlock();
 
 out_done:
+	/*
+	 * If we have a pack buddy CPU, we try to run load balance on a CPU
+	 * that is close to the buddy.
+	 */
+	if (buddy != -1)
+		for_each_domain(buddy, sd) {
+			if (sd->flags & SD_SHARE_CPUPOWER)
+				continue;
+
+			ilb = cpumask_first_and(sched_domain_span(sd),
+					nohz.idle_cpus_mask);
+
+			if (ilb < nr_cpu_ids)
+				break;
+		}
 	if (ilb < nr_cpu_ids && idle_cpu(ilb))
 		return ilb;
 

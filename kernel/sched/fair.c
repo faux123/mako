@@ -157,6 +157,76 @@ void sched_init_granularity(void)
 	update_sysctl();
 }
 
+
+#ifdef CONFIG_SMP
+/*
+ * Save the id of the optimal CPU that should be used to pack small tasks
+ * The value -1 is used when no buddy has been found
+ */
+DEFINE_PER_CPU(int, sd_pack_buddy);
+
+/*
+ * Look for the best buddy CPU that can be used to pack small tasks
+ * We make the assumption that it doesn't wort to pack on CPU that share the
+ * same powerline. We look for the 1st sched_domain without the
+ * SD_SHARE_POWERDOMAIN flag. Then we look for the sched_group with the lowest
+ * power per core based on the assumption that their power efficiency is
+ * better
+ */
+void update_packing_domain(int cpu)
+{
+	struct sched_domain *sd;
+	int id = -1;
+
+	sd = highest_flag_domain(cpu, SD_SHARE_POWERDOMAIN);
+	if (!sd)
+		sd = rcu_dereference_check_sched_domain(cpu_rq(cpu)->sd);
+	else
+		sd = sd->parent;
+
+	while (sd && (sd->flags & SD_LOAD_BALANCE)
+		&& !(sd->flags & SD_SHARE_POWERDOMAIN)) {
+		struct sched_group *sg = sd->groups;
+		struct sched_group *pack = sg;
+		struct sched_group *tmp;
+
+		/*
+		 * The sched_domain of a CPU points on the local sched_group
+		 * and the 1st CPU of this local group is a good candidate
+		 */
+		id = cpumask_first(sched_group_cpus(pack));
+
+		/* loop the sched groups to find the best one */
+		for (tmp = sg->next; tmp != sg; tmp = tmp->next) {
+			if (tmp->sgp->power * pack->group_weight >
+					pack->sgp->power * tmp->group_weight)
+				continue;
+
+			if ((tmp->sgp->power * pack->group_weight ==
+					pack->sgp->power * tmp->group_weight)
+			 && (cpumask_first(sched_group_cpus(tmp)) >= id))
+				continue;
+
+			/* we have found a better group */
+			pack = tmp;
+
+			/* Take the 1st CPU of the new group */
+			id = cpumask_first(sched_group_cpus(pack));
+		}
+
+		/* Look for another CPU than itself */
+		if (id != cpu)
+			break;
+
+		sd = sd->parent;
+	}
+
+	pr_debug("CPU%d packing on CPU%d\n", cpu, id);
+	per_cpu(sd_pack_buddy, cpu) = id;
+}
+
+#endif /* CONFIG_SMP */
+
 #if BITS_PER_LONG == 32
 # define WMULT_CONST	(~0UL)
 #else
@@ -3095,6 +3165,47 @@ done:
 	return target;
 }
 
+static bool is_buddy_busy(int cpu)
+{
+	struct rq *rq = cpu_rq(cpu);
+
+	/*
+	 * A busy buddy is a CPU with a high load or a small load with a lot of
+	 * running tasks.
+	 */
+	return (rq->avg.runnable_avg_sum >
+			(rq->avg.runnable_avg_period / (rq->nr_running + 2)));
+}
+
+static bool is_light_task(struct task_struct *p)
+{
+	/* A light task runs less than 20% in average */
+	return ((p->se.avg.runnable_avg_sum  * 5) <
+			(p->se.avg.runnable_avg_period));
+}
+
+static int check_pack_buddy(int cpu, struct task_struct *p)
+{
+	int buddy = per_cpu(sd_pack_buddy, cpu);
+
+	/* No pack buddy for this CPU */
+	if (buddy == -1)
+		return false;
+
+	/* buddy is not an allowed CPU */
+	if (!cpumask_test_cpu(buddy, tsk_cpus_allowed(p)))
+		return false;
+
+	/*
+	 * If the task is a small one and the buddy is not overloaded,
+	 * we use buddy cpu
+	 */
+	if (!is_light_task(p) || is_buddy_busy(buddy))
+		return false;
+
+	return true;
+}
+
 /*
  * sched_balance_self: balance the current task (running on cpu) in domains
  * that have the 'flag' flag set. In practice, this is SD_BALANCE_FORK and
@@ -3124,6 +3235,10 @@ select_task_rq_fair(struct task_struct *p, int sd_flag, int wake_flags)
 		if (cpumask_test_cpu(cpu, tsk_cpus_allowed(p)))
 			want_affine = 1;
 		new_cpu = prev_cpu;
+
+		/* We pack only at wake up and not new task */
+		if (check_pack_buddy(new_cpu, p))
+			return per_cpu(sd_pack_buddy, new_cpu);
 	}
 
 	rcu_read_lock();

@@ -122,8 +122,8 @@ struct platform_device msm8064_pc_cntr = {
 };
 
 static struct msm_watchdog_pdata msm_watchdog_pdata = {
-	.pet_time = 10000,
-	.bark_time = 11000,
+	.pet_time = 20000,
+	.bark_time = 21000,
 	.has_secure = true,
 	.needs_expired_enable = true,
 	.base = MSM_TMR0_BASE + WDT0_OFFSET,

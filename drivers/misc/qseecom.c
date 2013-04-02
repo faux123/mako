@@ -1405,7 +1405,7 @@ int qseecom_start_app(struct qseecom_handle **handle,
 	atomic_set(&data->ioctl_count, 0);
 
 	data->client.ihandle = ion_alloc(qseecom.ion_clnt, size, 4096,
-				ION_HEAP(ION_QSECOM_HEAP_ID), 0);
+				ION_HEAP(ION_QSECOM_HEAP_ID));
 	if (IS_ERR_OR_NULL(data->client.ihandle)) {
 		pr_err("Ion client could not retrieve the handle\n");
 		kfree(data);
@@ -1465,7 +1465,8 @@ int qseecom_start_app(struct qseecom_handle **handle,
 	ret = ion_phys(qseecom.ion_clnt, data->client.ihandle, &pa, &len);
 	/* Populate the structure for sending scm call to load image */
 	data->client.sb_virt = (char *) ion_map_kernel(qseecom.ion_clnt,
-							data->client.ihandle);
+							data->client.ihandle,
+							flags);
 	data->client.sb_phys = pa;
 	(*handle)->dev = (void *)data;
 	(*handle)->sbuf = (unsigned char *)data->client.sb_virt;

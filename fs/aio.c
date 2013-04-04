@@ -35,6 +35,7 @@
 #include <linux/eventfd.h>
 #include <linux/blkdev.h>
 #include <linux/compat.h>
+#include <linux/radix-tree.h>
 
 #include <asm/kmap_types.h>
 #include <asm/uaccess.h>
@@ -287,10 +288,18 @@ static struct kioctx *ioctx_alloc(unsigned nr_events)
 	aio_nr += ctx->max_reqs;
 	spin_unlock(&aio_nr_lock);
 
-	/* now link into global list. */
+	/* now insert into the radix tree */
+	err = radix_tree_preload(GFP_KERNEL);
+	if (err)
+		goto out_cleanup;
 	spin_lock(&mm->ioctx_lock);
-	hlist_add_head_rcu(&ctx->list, &mm->ioctx_list);
+	err = radix_tree_insert(&mm->ioctx_rtree, ctx->user_id, ctx);
 	spin_unlock(&mm->ioctx_lock);
+	radix_tree_preload_end();
+	if (err) {
+		WARN_ONCE(1, "aio: insert into ioctx tree failed: %d", err);
+		goto out_cleanup;
+	}
 
 	dprintk("aio: allocated ioctx %p[%ld]: mm=%p mask=0x%x\n",
 		ctx, ctx->user_id, current->mm, ctx->ring_info.nr);
@@ -368,6 +377,32 @@ ssize_t wait_on_sync_kiocb(struct kiocb *iocb)
 }
 EXPORT_SYMBOL(wait_on_sync_kiocb);
 
+static inline void exit_aio_ctx(struct mm_struct *mm, struct kioctx *ctx)
+{
+	void *ret;
+
+	ret = radix_tree_delete(&mm->ioctx_rtree, ctx->user_id);
+	BUG_ON(!ret || ret != ctx);
+
+	kill_ctx(ctx);
+
+	if (1 != atomic_read(&ctx->users))
+		pr_debug("exit_aio:ioctx still alive: %d %d %d\n",
+			 atomic_read(&ctx->users), ctx->dead, ctx->reqs_active);
+	/*
+	 * We don't need to bother with munmap() here -
+	 * exit_mmap(mm) is coming and it'll unmap everything.
+	 * Since aio_free_ring() uses non-zero ->mmap_size
+	 * as indicator that it needs to unmap the area,
+	 * just set it to 0; aio_free_ring() is the only
+	 * place that uses ->mmap_size, so it's safe.
+	 * That way we get all munmap done to current->mm -
+	 * all other callers have ctx->mm == current->mm.
+	 */
+	ctx->ring_info.mmap_size = 0;
+	put_ioctx(ctx);
+}
+
 /* exit_aio: called when the last user of mm goes away.  At this point, 
  * there is no way for any new requests to be submited or any of the 
  * io_* syscalls to be called on the context.  However, there may be 
@@ -377,32 +412,17 @@ EXPORT_SYMBOL(wait_on_sync_kiocb);
  */
 void exit_aio(struct mm_struct *mm)
 {
-	struct kioctx *ctx;
+	struct kioctx *ctx[16];
+	int count;
 
-	while (!hlist_empty(&mm->ioctx_list)) {
-		ctx = hlist_entry(mm->ioctx_list.first, struct kioctx, list);
-		hlist_del_rcu(&ctx->list);
+	do {
+		int i;
 
-		kill_ctx(ctx);
-
-		if (1 != atomic_read(&ctx->users))
-			printk(KERN_DEBUG
-				"exit_aio:ioctx still alive: %d %d %d\n",
-				atomic_read(&ctx->users), ctx->dead,
-				ctx->reqs_active);
-		/*
-		 * We don't need to bother with munmap() here -
-		 * exit_mmap(mm) is coming and it'll unmap everything.
-		 * Since aio_free_ring() uses non-zero ->mmap_size
-		 * as indicator that it needs to unmap the area,
-		 * just set it to 0; aio_free_ring() is the only
-		 * place that uses ->mmap_size, so it's safe.
-		 * That way we get all munmap done to current->mm -
-		 * all other callers have ctx->mm == current->mm.
-		 */
-		ctx->ring_info.mmap_size = 0;
-		put_ioctx(ctx);
-	}
+		count = radix_tree_gang_lookup(&mm->ioctx_rtree, (void **)ctx,
+					       0, ARRAY_SIZE(ctx));
+		for (i = 0; i < count; i++)
+			exit_aio_ctx(mm, ctx[i]);
+	} while (count);
 }
 
 /* aio_get_req
@@ -657,22 +677,18 @@ static struct kioctx *lookup_ioctx(unsigned long ctx_id)
 {
 	struct mm_struct *mm = current->mm;
 	struct kioctx *ctx, *ret = NULL;
-	struct hlist_node *n;
 
 	rcu_read_lock();
 
-	hlist_for_each_entry_rcu(ctx, n, &mm->ioctx_list, list) {
-		/*
-		 * RCU protects us against accessing freed memory but
-		 * we have to be careful not to get a reference when the
-		 * reference count already dropped to 0 (ctx->dead test
-		 * is unreliable because of races).
-		 */
-		if (ctx->user_id == ctx_id && !ctx->dead && try_get_ioctx(ctx)){
-			ret = ctx;
-			break;
-		}
-	}
+	ctx = radix_tree_lookup(&mm->ioctx_rtree, ctx_id);
+	/*
+	 * RCU protects us against accessing freed memory but
+	 * we have to be careful not to get a reference when the
+	 * reference count already dropped to 0 (ctx->dead test
+	 * is unreliable because of races).
+	 */
+	if (ctx && !ctx->dead && try_get_ioctx(ctx))
+		ret = ctx;
 
 	rcu_read_unlock();
 	return ret;
@@ -1271,7 +1287,7 @@ static void io_destroy(struct kioctx *ioctx)
 	spin_lock(&mm->ioctx_lock);
 	was_dead = ioctx->dead;
 	ioctx->dead = 1;
-	hlist_del_rcu(&ioctx->list);
+	radix_tree_delete(&mm->ioctx_rtree, ioctx->user_id);
 	spin_unlock(&mm->ioctx_lock);
 
 	dprintk("aio_release(%p)\n", ioctx);

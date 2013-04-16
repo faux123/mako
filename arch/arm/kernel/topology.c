@@ -39,12 +39,64 @@
  * rebalance_domains for all idle cores and the cpu_power can be updated
  * during this sequence.
  */
+
+/* when CONFIG_ARCH_SCALE_INVARIANT_CPU_CAPACITY is in use, a new measure of
+ * compute capacity is available. This is limited to a maximum of 1024 and
+ * scaled between 0 and 1023 according to frequency.
+ * Cores with different base CPU powers are scaled in line with this.
+ * CPU capacity for each core represents a comparable ratio to maximum
+ * achievable core compute capacity for a core in this system.
+ *
+ * e.g.1 If all cores in the system have a base CPU power of 1024 according to
+ * efficiency calculations and are DVFS scalable between 500MHz and 1GHz, the
+ * cores currently at 1GHz will have CPU power of 1024 whilst the cores
+ * currently at 500MHz will have CPU power of 512.
+ *
+ * e.g.2
+ * If core 0 has a base CPU power of 2048 and runs at 500MHz & 1GHz whilst
+ * core 1 has a base CPU power of 1024 and runs at 100MHz and 200MHz, then
+ * the following possibilities are available:
+ *
+ * cpu power\| 1GHz:100Mhz | 1GHz : 200MHz | 500MHz:100MHz | 500MHz:200MHz |
+ * ----------|-------------|---------------|---------------|---------------|
+ *    core 0 |    1024     |     1024      |     512       |     512       |
+ *    core 1 |     256     |      512      |     256       |     512       |
+ *
+ * This information may be useful to the scheduler when load balancing,
+ * so that the compute capacity of the core a task ran on can be baked into
+ * task load histories.
+ */
 static DEFINE_PER_CPU(unsigned long, cpu_scale);
+static DEFINE_PER_CPU(unsigned long, base_cpu_capacity);
+static DEFINE_PER_CPU(unsigned long, invariant_cpu_capacity);
+static DEFINE_PER_CPU(unsigned long, prescaled_cpu_capacity);
+
+static int frequency_invariant_power_enabled = 1;
+
+/* >0=1, <=0=0 */
+void set_invariant_power_enabled(int val)
+{
+	if(val>0)
+		frequency_invariant_power_enabled = 1;
+	else
+		frequency_invariant_power_enabled = 0;
+}
 
 unsigned long arch_scale_freq_power(struct sched_domain *sd, int cpu)
 {
 	return per_cpu(cpu_scale, cpu);
 }
+
+#ifdef CONFIG_ARCH_SCALE_INVARIANT_CPU_CAPACITY
+unsigned long arch_get_cpu_capacity(int cpu)
+{
+	return per_cpu(invariant_cpu_capacity, cpu);
+}
+unsigned long arch_get_max_cpu_capacity(int cpu)
+{
+	return per_cpu(base_cpu_capacity, cpu);
+}
+#endif
 
 static void set_power_scale(unsigned int cpu, unsigned long power)
 {
@@ -81,7 +133,6 @@ struct cpu_capacity {
 struct cpu_capacity *cpu_capacity;
 
 unsigned long middle_capacity = 1;
-
 /*
  * Iterate all CPUs' descriptor in DT and compute the efficiency
  * (as per table_efficiency). Also calculate a middle efficiency
@@ -320,3 +371,165 @@ void __init init_cpu_topology(void)
 
 	parse_dt_topology();
 }
+
+
+#ifdef CONFIG_ARCH_SCALE_INVARIANT_CPU_CAPACITY
+#include <linux/cpufreq.h>
+
+#define CPUPOWER_FREQSCALE_SHIFT 10
+#define CPUPOWER_FREQSCALE_DEFAULT (1L << CPUPOWER_FREQSCALE_SHIFT)
+struct cpufreq_extents {
+       u32 max;
+       u32 flags;
+};
+/* Flag set when the governor in use only allows one frequency.
+ * Disables scaling.
+ */
+#define CPUPOWER_FREQINVAR_SINGLEFREQ 0x01
+static struct cpufreq_extents freq_scale[CONFIG_NR_CPUS];
+
+static unsigned long get_max_cpu_power(void)
+{
+       unsigned long max_cpu_power = 0;
+       int cpu;
+       for_each_online_cpu(cpu){
+               if( per_cpu(cpu_scale, cpu) > max_cpu_power)
+                       max_cpu_power = per_cpu(cpu_scale, cpu);
+       }
+       return max_cpu_power;
+}
+
+
+/* Called when the CPU Frequency is changed.
+ * Once for each CPU.
+ */
+static int cpufreq_callback(struct notifier_block *nb,
+                                       unsigned long val, void *data)
+{
+       struct cpufreq_freqs *freq = data;
+       int cpu = freq->cpu;
+       struct cpufreq_extents *extents;
+       unsigned int curr_freq;
+
+       if (freq->flags & CPUFREQ_CONST_LOOPS)
+               return NOTIFY_OK;
+
+       if (val != CPUFREQ_POSTCHANGE)
+               return NOTIFY_OK;
+
+       /* if dynamic load scale is disabled, set the load scale to 1.0 */
+       if (!frequency_invariant_power_enabled) {
+               per_cpu(invariant_cpu_capacity, cpu) = per_cpu(base_cpu_capacity, cpu);
+               return NOTIFY_OK;
+       }
+
+       extents = &freq_scale[cpu];
+       /* If our governor was recognised as a single-freq governor,
+        * use curr = max to be sure multiplier is 1.0
+        */
+       if (extents->flags & CPUPOWER_FREQINVAR_SINGLEFREQ)
+               curr_freq = extents->max;
+       else
+               curr_freq = freq->new >> CPUPOWER_FREQSCALE_SHIFT;
+
+       per_cpu(invariant_cpu_capacity, cpu) = (curr_freq *
+               per_cpu(prescaled_cpu_capacity, cpu)) >> CPUPOWER_FREQSCALE_SHIFT;
+       return NOTIFY_OK;
+}
+
+/* Called when the CPUFreq governor is changed.
+ * Only called for the CPUs which are actually changed by the
+ * userspace.
+ */
+static int cpufreq_policy_callback(struct notifier_block *nb,
+                                      unsigned long event, void *data)
+{
+       struct cpufreq_policy *policy = data;
+       struct cpufreq_extents *extents;
+       int cpu, singleFreq = 0, cpu_capacity;
+       static const char performance_governor[] = "performance";
+       static const char powersave_governor[] = "powersave";
+       unsigned long max_cpu_power;
+
+       if (event == CPUFREQ_START)
+               return 0;
+
+       if (event != CPUFREQ_INCOMPATIBLE)
+               return 0;
+
+       /* CPUFreq governors do not accurately report the range of
+        * CPU Frequencies they will choose from.
+        * We recognise performance and powersave governors as
+        * single-frequency only.
+        */
+       if (!strncmp(policy->governor->name, performance_governor,
+                       strlen(performance_governor)) ||
+               !strncmp(policy->governor->name, powersave_governor,
+                               strlen(powersave_governor)))
+               singleFreq = 1;
+
+       max_cpu_power = get_max_cpu_power();
+       /* Make sure that all CPUs impacted by this policy are
+        * updated since we will only get a notification when the
+        * user explicitly changes the policy on a CPU.
+        */
+       for_each_cpu(cpu, policy->cpus) {
+               /* scale cpu_power to max(1024) */
+               cpu_capacity = (per_cpu(cpu_scale, cpu) << CPUPOWER_FREQSCALE_SHIFT)
+                               / max_cpu_power;
+               extents = &freq_scale[cpu];
+               extents->max = policy->max >> CPUPOWER_FREQSCALE_SHIFT;
+               if (!frequency_invariant_power_enabled) {
+                       /* when disabled, invariant_cpu_scale = cpu_scale */
+                       per_cpu(base_cpu_capacity, cpu) = CPUPOWER_FREQSCALE_DEFAULT;
+                       per_cpu(invariant_cpu_capacity, cpu) = CPUPOWER_FREQSCALE_DEFAULT;
+                       /* unused when disabled */
+                       per_cpu(prescaled_cpu_capacity, cpu) = CPUPOWER_FREQSCALE_DEFAULT;
+               } else {
+                       if (singleFreq)
+                               extents->flags |= CPUPOWER_FREQINVAR_SINGLEFREQ;
+                       else
+                               extents->flags &= ~CPUPOWER_FREQINVAR_SINGLEFREQ;
+                       per_cpu(base_cpu_capacity, cpu) = cpu_capacity;
+                       per_cpu(prescaled_cpu_capacity, cpu) = (cpu_capacity << CPUPOWER_FREQSCALE_SHIFT) / extents->max;
+                       per_cpu(invariant_cpu_capacity, cpu) =
+                                       ((policy->cur >> CPUPOWER_FREQSCALE_SHIFT) *
+                                       per_cpu(prescaled_cpu_capacity, cpu)) >> CPUPOWER_FREQSCALE_SHIFT;
+               }
+       }
+       return 0;
+}
+
+static struct notifier_block cpufreq_notifier = {
+       .notifier_call  = cpufreq_callback,
+};
+static struct notifier_block cpufreq_policy_notifier = {
+       .notifier_call  = cpufreq_policy_callback,
+};
+
+static int __init register_topology_cpufreq_notifier(void)
+{
+       int ret;
+
+       /* init safe defaults since there are no policies at registration */
+       for (ret = 0; ret < CONFIG_NR_CPUS; ret++) {
+               /* safe defaults */
+               freq_scale[ret].max = CPUPOWER_FREQSCALE_DEFAULT;
+               per_cpu(base_cpu_capacity, ret) = CPUPOWER_FREQSCALE_DEFAULT;
+               per_cpu(invariant_cpu_capacity, ret) = CPUPOWER_FREQSCALE_DEFAULT;
+               per_cpu(prescaled_cpu_capacity, ret) = CPUPOWER_FREQSCALE_DEFAULT;
+       }
+
+       pr_info("topology: registering cpufreq notifiers for scale-invariant CPU Power\n");
+       ret = cpufreq_register_notifier(&cpufreq_policy_notifier,
+                       CPUFREQ_POLICY_NOTIFIER);
+
+       if (ret != -EINVAL)
+               ret = cpufreq_register_notifier(&cpufreq_notifier,
+                       CPUFREQ_TRANSITION_NOTIFIER);
+
+       return ret;
+}
+
+core_initcall(register_topology_cpufreq_notifier);
+#endif /* CONFIG_ARCH_SCALE_INVARIANT_CPU_CAPACITY */

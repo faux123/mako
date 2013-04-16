@@ -19,6 +19,13 @@ extern struct cputopo_arm cpu_topology[NR_CPUS];
 #define topology_core_id(cpu)		(cpu_topology[cpu].core_id)
 #define topology_core_cpumask(cpu)	(&cpu_topology[cpu].core_sibling)
 #define topology_thread_cpumask(cpu)	(&cpu_topology[cpu].thread_sibling)
+#ifdef CONFIG_ARCH_SCALE_INVARIANT_CPU_CAPACITY
+extern unsigned long arch_get_max_cpu_capacity(int);
+extern unsigned long arch_get_cpu_capacity(int);
+
+#define topology_max_cpu_capacity(cpu)	(arch_get_max_cpu_capacity(cpu))
+#define topology_cpu_capacity(cpu)	(arch_get_cpu_capacity(cpu))
+#endif
 
 #define mc_capable()	(cpu_topology[0].socket_id != -1)
 #define smt_capable()	(cpu_topology[0].thread_id != -1)

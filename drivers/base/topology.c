@@ -43,6 +43,13 @@ static ssize_t show_##name(struct device *dev,			\
 	unsigned int cpu = dev->id;				\
 	return sprintf(buf, "%d\n", topology_##name(cpu));	\
 }
+#define define_id_lu_show_func(name)                   \
+static ssize_t show_##name(struct device *dev,                 \
+               struct device_attribute *attr, char *buf)       \
+{                                                              \
+       unsigned int cpu = dev->id;                             \
+       return sprintf(buf, "%lu\n", topology_##name(cpu));     \
+}
 
 #if defined(topology_thread_cpumask) || defined(topology_core_cpumask) || \
     defined(topology_book_cpumask)
@@ -122,6 +129,13 @@ define_one_ro_named(book_siblings, show_book_cpumask);
 define_one_ro_named(book_siblings_list, show_book_cpumask_list);
 #endif
 
+#ifdef CONFIG_ARCH_SCALE_INVARIANT_CPU_CAPACITY
+define_id_lu_show_func(max_cpu_capacity);
+define_one_ro(max_cpu_capacity);
+define_id_lu_show_func(cpu_capacity);
+define_one_ro(cpu_capacity);
+#endif
+
 static struct attribute *default_attrs[] = {
 	&dev_attr_physical_package_id.attr,
 	&dev_attr_core_id.attr,
@@ -133,6 +147,10 @@ static struct attribute *default_attrs[] = {
 	&dev_attr_book_id.attr,
 	&dev_attr_book_siblings.attr,
 	&dev_attr_book_siblings_list.attr,
+#endif
+#ifdef CONFIG_ARCH_SCALE_INVARIANT_CPU_CAPACITY
+	&dev_attr_max_cpu_capacity.attr,
+	&dev_attr_cpu_capacity.attr,
 #endif
 	NULL
 };

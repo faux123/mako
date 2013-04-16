@@ -1599,6 +1599,22 @@ config SCHED_SMT
 	  MultiThreading at a cost of slightly increased overhead in some
 	  places. If unsure say N here.
 
+config ARCH_SCALE_INVARIANT_CPU_CAPACITY
+       bool "Scale-Invariant CPU Compute Capacity Recording (EXPERIMENTAL)"
+       depends on EXPERIMENTAL
+       depends on CPU_FREQ
+       help
+         Provides a new measure of maximum and instantaneous CPU compute
+         capacity, derived from a table of relative compute performance
+         for each core type present in the system. The table is an
+         estimate and specific core performance may be different for
+         any particular workload. The measure includes the relative
+         performance and a linear scale of current to maximum frequency
+         such that at maximum frequency (as expressed in the DTB) the
+         reported compute capacity will be equal to the estimated
+         performance from the table. Values range between 0 and 1023 where
+         1023 is the highest capacity available in the system.
+
 config HAVE_ARM_SCU
 	bool
 	help

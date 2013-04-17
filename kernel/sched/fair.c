@@ -1102,11 +1102,15 @@ static inline void update_cpu_capacity(int cpu)
 static __always_inline int __update_entity_runnable_avg(u64 now,
 							struct sched_avg *sa,
 							int runnable,
-							int running)
+							int running,
+							int cpu)
 {
 	u64 delta, periods;
 	u32 runnable_contrib;
 	int delta_w, decayed = 0;
+#ifdef CONFIG_ARCH_SCALE_INVARIANT_CPU_CAPACITY
+	u32 curr_scale = 1<<SCHED_ARCH_SCALE_POWER_SHIFT;
+#endif /* CONFIG_ARCH_SCALE_INVARIANT_CPU_CAPACITY */
 
 	delta = now - sa->last_runnable_update;
 	/*
@@ -1127,6 +1131,12 @@ static __always_inline int __update_entity_runnable_avg(u64 now,
 		return 0;
 	sa->last_runnable_update = now;
 
+#ifdef CONFIG_ARCH_SCALE_INVARIANT_CPU_CAPACITY
+	update_cpu_capacity(cpu);
+	curr_scale = (compute_capacity_of(cpu) << SCHED_ARCH_SCALE_POWER_SHIFT)
+			/ (max_compute_capacity_of(cpu)+1);
+#endif
+
 	/* delta_w is the amount already accumulated against our next period */
 	delta_w = sa->runnable_avg_period % 1024;
 	if (delta + delta_w >= 1024) {
@@ -1139,13 +1149,17 @@ static __always_inline int __update_entity_runnable_avg(u64 now,
 		 * period and accrue it.
 		 */
 		delta_w = 1024 - delta_w;
+		sa->runnable_avg_period += delta_w;
+		delta -= delta_w;
+		/* scale runnable time if necessary */
+#ifdef CONFIG_ARCH_SCALE_INVARIANT_CPU_CAPACITY
+		delta_w = (delta_w * curr_scale)
+				>> SCHED_ARCH_SCALE_POWER_SHIFT;
+#endif
 		if (runnable)
 			sa->runnable_avg_sum += delta_w;
 		if (running)
 			sa->usage_avg_sum += delta_w;
-		sa->runnable_avg_period += delta_w;
-
-		delta -= delta_w;
 
 		/* Figure out how many additional periods this update spans */
 		periods = delta / 1024;
@@ -1159,19 +1173,31 @@ static __always_inline int __update_entity_runnable_avg(u64 now,
 
 		/* Efficiently calculate \sum (1..n_period) 1024*y^i */
 		runnable_contrib = __compute_runnable_contrib(periods);
+		sa->runnable_avg_period += runnable_contrib;
+		/* Apply load scaling if necessary.
+		 * Note that multiplying the whole series is same as
+		 * multiplying all terms
+		 */
+#ifdef CONFIG_ARCH_SCALE_INVARIANT_CPU_CAPACITY
+		runnable_contrib = (runnable_contrib * curr_scale)
+				>> SCHED_ARCH_SCALE_POWER_SHIFT;
+#endif 
 		if (runnable)
 			sa->runnable_avg_sum += runnable_contrib;
 		if (running)
 			sa->usage_avg_sum += runnable_contrib;
-		sa->runnable_avg_period += runnable_contrib;
 	}
 
 	/* Remainder of delta accrued against u_0` */
+	sa->runnable_avg_period += delta;
+	/* scale if necessary */
+#ifdef CONFIG_ARCH_SCALE_INVARIANT_CPU_CAPACITY
+	delta = ((delta * curr_scale) >> SCHED_ARCH_SCALE_POWER_SHIFT);
+#endif
 	if (runnable)
 		sa->runnable_avg_sum += delta;
 	if (running)
 		sa->usage_avg_sum += delta;
-	sa->runnable_avg_period += delta;
 
 	return decayed;
 }
@@ -1333,7 +1359,11 @@ static inline void update_entity_load_avg(struct sched_entity *se,
 	struct cfs_rq *cfs_rq = cfs_rq_of(se);
 	long contrib_delta;
 	u64 now;
+	int cpu = -1;   /* not used in normal case */
 
+#ifdef CONFIG_ARCH_SCALE_INVARIANT_CPU_CAPACITY
+	cpu = cfs_rq->rq->cpu;
+#endif
 	/*
 	 * For a group entity we need to use their owned cfs_rq_clock_task() in
 	 * case they are the parent of a throttled hierarchy.
@@ -1344,7 +1374,7 @@ static inline void update_entity_load_avg(struct sched_entity *se,
 		now = cfs_rq_clock_task(group_cfs_rq(se));
 
 	if (!__update_entity_runnable_avg(now, &se->avg, se->on_rq,
-					  cfs_rq->curr == se))
+			cfs_rq->curr == se, cpu))
 		return;
 
 	contrib_delta = __update_entity_load_avg_contrib(se);
@@ -1389,8 +1419,14 @@ static void update_cfs_rq_blocked_load(struct cfs_rq *cfs_rq, int force_update)
 
 static inline void update_rq_runnable_avg(struct rq *rq, int runnable)
 {
+	int cpu = -1;   /* not used in normal case */
+
+#ifdef CONFIG_ARCH_SCALE_INVARIANT_CPU_CAPACITY
+	cpu = rq->cpu;
+#endif
+
 	__update_entity_runnable_avg(rq->clock_task, &rq->avg, runnable,
-				     runnable);
+				     runnable, cpu);
 	__update_tg_runnable_avg(&rq->avg, &rq->cfs);
 }
 

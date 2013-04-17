@@ -415,6 +415,10 @@ struct rq {
 
 	unsigned long cpu_power;
 
+	/* CPU compute capacity estimation */
+	unsigned long max_compute_capacity;
+	unsigned long curr_compute_capacity;
+
 	unsigned char idle_balance;
 	/* For active balancing */
 	int post_schedule;

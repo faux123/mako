@@ -42,6 +42,14 @@ config CPU_FREQ_STAT_DETAILS
 
 	  If in doubt, say N.
 
+config QUAD_CORES_SOC_STAT
+	bool "Overall statistic details for quadcore SOCs"
+	depends on CPU_FREQ_STAT
+	default n
+	help
+	  This will show overall CPU frequency statistics via sysfs.
+	  If this option is not set, it defaults to dual core stats
+
 choice
 	prompt "Default CPUFreq governor"
 	default CPU_FREQ_DEFAULT_GOV_USERSPACE if CPU_FREQ_SA1100 || CPU_FREQ_SA1110

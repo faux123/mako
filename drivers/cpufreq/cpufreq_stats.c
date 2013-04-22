@@ -83,21 +83,21 @@ static int cpufreq_stats_update(unsigned int cpu)
 
 	if (cpu == 0)
 		cpu0_time_in_state[stat->last_index] =
-			cputime64_add(cpu0_time_in_state[stat->last_index],
-			cputime_sub(cur_time, stat->last_time));
+			cpu0_time_in_state[stat->last_index] +
+			(cur_time - stat->last_time);
 	else if (cpu == 1)
 		cpu1_time_in_state[stat->last_index] =
-			cputime64_add(cpu1_time_in_state[stat->last_index],
-			cputime_sub(cur_time, stat->last_time));
+			cpu1_time_in_state[stat->last_index] +
+			(cur_time - stat->last_time);
 #ifdef CONFIG_QUAD_CORES_SOC_STAT
 	else if (cpu == 2)
 		cpu2_time_in_state[stat->last_index] =
-			cputime64_add(cpu2_time_in_state[stat->last_index],
-			cputime_sub(cur_time, stat->last_time));
+			cpu2_time_in_state[stat->last_index] +
+			(cur_time - stat->last_time);
 	else if (cpu == 3)
 		cpu3_time_in_state[stat->last_index] =
-			cputime64_add(cpu3_time_in_state[stat->last_index],
-			cputime_sub(cur_time, stat->last_time));
+			cpu3_time_in_state[stat->last_index] +
+			(cur_time - stat->last_time);
 #endif
 	stat->last_time = cur_time;
 	spin_unlock(&cpufreq_stats_lock);

@@ -1050,6 +1050,27 @@ static u32 __compute_runnable_contrib(u64 n)
 	return contrib + runnable_avg_yN_sum[n];
 }
 
+#ifdef CONFIG_ARCH_SCALE_INVARIANT_CPU_CAPACITY
+#define SCHED_ARCH_SCALE_POWER_SHIFT 10
+#endif
+static inline unsigned long compute_capacity_of(int cpu)
+{
+	return cpu_rq(cpu)->curr_compute_capacity;
+}
+
+static inline unsigned long max_compute_capacity_of(int cpu)
+{
+	return cpu_rq(cpu)->max_compute_capacity;
+}
+
+static inline void update_cpu_capacity(int cpu)
+{
+	int tmp_capacity = arch_get_cpu_capacity(cpu);
+	int tmp_max_capacity = arch_get_max_cpu_capacity(cpu);
+	trace_sched_upd_cap(cpu, tmp_capacity, tmp_max_capacity);
+	cpu_rq(cpu)->max_compute_capacity = tmp_max_capacity;
+	cpu_rq(cpu)->curr_compute_capacity = tmp_capacity;
+}
 /*
  * We can represent the historical contribution to runnable average as the
  * coefficients of a geometric series.  To do this we sub-divide our runnable
@@ -4029,6 +4050,8 @@ struct sd_lb_stats {
 	unsigned long total_load;  /* Total load of all groups in sd */
 	unsigned long total_pwr;   /*	Total power of all groups in sd */
 	unsigned long avg_load;	   /* Average load across all groups in sd */
+	unsigned long total_cap;   /* Total current compute capacity of all groups in sd */
+	unsigned long total_maxcap; /* Total max compute capacity of all groups in sd */
 
 	/** Statistics of this group */
 	unsigned long this_load;
@@ -4057,7 +4080,9 @@ struct sg_lb_stats {
 	unsigned long group_load; /* Total load over the CPUs of the group */
 	unsigned long sum_nr_running; /* Nr tasks running in the group */
 	unsigned long sum_weighted_load; /* Weighted load of group's tasks */
-	unsigned long group_capacity;
+	unsigned long group_compute_capacity; /* current compute capacity of the group */
+	unsigned long group_max_compute_capacity; /* maximum compute capacity of the group */
+	unsigned long group_capacity; /* Nr tasks this group can handle before considered overloaded */
 	unsigned long idle_cpus;
 	unsigned long group_weight;
 	int group_imb; /* Is there an imbalance in the group ? */
@@ -4098,6 +4123,23 @@ unsigned long default_scale_freq_power(struct sched_domain *sd, int cpu)
 unsigned long __weak arch_scale_freq_power(struct sched_domain *sd, int cpu)
 {
 	return default_scale_freq_power(sd, cpu);
+}
+unsigned long __weak arch_cpu_capacity(int cpu)
+{
+	return SCHED_POWER_SCALE;
+}
+unsigned long __weak arch_max_cpu_capacity(int cpu)
+{
+	return SCHED_POWER_SCALE;
+}
+
+unsigned long __weak arch_get_cpu_capacity(int cpu)
+{
+	return SCHED_POWER_SCALE;
+}
+unsigned long __weak arch_get_max_cpu_capacity(int cpu)
+{
+	return SCHED_POWER_SCALE;
 }
 
 unsigned long default_scale_smt_power(struct sched_domain *sd, int cpu)
@@ -4168,6 +4210,7 @@ static void update_cpu_power(struct sched_domain *sd, int cpu)
 		power = 1;
 
 	cpu_rq(cpu)->cpu_power = power;
+	update_cpu_capacity(cpu);
 	sdg->sgp->power = power;
 }
 
@@ -4176,6 +4219,7 @@ void update_group_power(struct sched_domain *sd, int cpu)
 	struct sched_domain *child = sd->child;
 	struct sched_group *group, *sdg = sd->groups;
 	unsigned long power;
+	unsigned long compute_capacity, max_compute_capacity;
 	unsigned long interval;
 
 	interval = msecs_to_jiffies(sd->balance_interval);
@@ -4188,6 +4232,8 @@ void update_group_power(struct sched_domain *sd, int cpu)
 	}
 
 	power = 0;
+	compute_capacity = 0;
+	max_compute_capacity = 0;
 
 	if (child->flags & SD_OVERLAP) {
 		/*
@@ -4195,8 +4241,11 @@ void update_group_power(struct sched_domain *sd, int cpu)
 		 * span the current group.
 		 */
 
-		for_each_cpu(cpu, sched_group_cpus(sdg))
+		for_each_cpu(cpu, sched_group_cpus(sdg)) {
 			power += power_of(cpu);
+			compute_capacity += compute_capacity_of(cpu);
+			max_compute_capacity += max_compute_capacity_of(cpu);
+		}
 	} else  {
 		/*
 		 * !SD_OVERLAP domains can assume that child groups
@@ -4206,11 +4255,17 @@ void update_group_power(struct sched_domain *sd, int cpu)
 		group = child->groups;
 		do {
 			power += group->sgp->power;
+			compute_capacity += group->sgp->compute_capacity;
+			max_compute_capacity +=
+				group->sgp->max_compute_capacity;
+
 			group = group->next;
 		} while (group != child->groups);
 	}
 
 	sdg->sgp->power = power;
+	sdg->sgp->compute_capacity = compute_capacity;
+	sdg->sgp->max_compute_capacity = max_compute_capacity;
 }
 
 /*
@@ -4293,6 +4348,8 @@ static inline void update_sg_lb_stats(struct sched_domain *sd,
 		sgs->group_load += load;
 		sgs->sum_nr_running += rq->nr_running;
 		sgs->sum_weighted_load += weighted_cpuload(i);
+		sgs->group_compute_capacity += compute_capacity_of(i);
+		sgs->group_max_compute_capacity += max_compute_capacity_of(i);
 		if (idle_cpu(i))
 			sgs->idle_cpus++;
 	}
@@ -4422,6 +4479,8 @@ static inline void update_sd_lb_stats(struct sched_domain *sd, int this_cpu,
 
 		sds->total_load += sgs.group_load;
 		sds->total_pwr += sg->sgp->power;
+		sds->total_cap += sg->sgp->compute_capacity;
+		sds->total_maxcap += sg->sgp->compute_capacity;
 
 		/*
 		 * In case the child domain prefers tasks go to siblings
@@ -4772,12 +4831,12 @@ find_busiest_queue(struct sched_domain *sd, struct sched_group *group,
 
 	for_each_cpu(i, sched_group_cpus(group)) {
 		unsigned long power = power_of(i);
-		unsigned long capacity = DIV_ROUND_CLOSEST(power,
+		unsigned long task_capacity = DIV_ROUND_CLOSEST(power,
 							   SCHED_POWER_SCALE);
 		unsigned long wl;
 
-		if (!capacity)
-			capacity = fix_small_capacity(sd, group);
+		if (!task_capacity)
+			task_capacity = fix_small_capacity(sd, group);
 
 		if (!cpumask_test_cpu(i, cpus))
 			continue;
@@ -4789,7 +4848,7 @@ find_busiest_queue(struct sched_domain *sd, struct sched_group *group,
 		 * When comparing with imbalance, use weighted_cpuload()
 		 * which is not scaled with the cpu power.
 		 */
-		if (capacity && rq->nr_running == 1 && wl > imbalance)
+		if (task_capacity && rq->nr_running == 1 && wl > imbalance)
 			continue;
 
 		/*

@@ -284,6 +284,9 @@ static void print_cpu(struct seq_file *m, int cpu)
 #define PN(x) \
 	SEQ_printf(m, "  .%-30s: %Ld.%06ld\n", #x, SPLIT_NS(rq->x))
 
+	P(cpu_power);
+	P(curr_compute_capacity);
+	P(max_compute_capacity);
 	P(nr_running);
 	SEQ_printf(m, "  .%-30s: %d.%03d   \n", "ave_nr_running",
 		   rq->ave_nr_running / FIXED_1,

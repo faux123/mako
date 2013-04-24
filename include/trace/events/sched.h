@@ -398,30 +398,6 @@ TRACE_EVENT(sched_stat_runtime,
 );
 
 /*
- * Extra debug trace points
- */
-TRACE_EVENT(sched_upd_cap,
-
-	TP_PROTO(int dst_cpu, unsigned long curr, unsigned long max ),
-
-	TP_ARGS(dst_cpu, curr, max ),
-
-	TP_STRUCT__entry(
-		__field(int,  dst_cpu)
-		__field(unsigned long,  curr)
-		__field(unsigned long,  max)
-	),
-
-	TP_fast_assign(
-		__entry->dst_cpu = dst_cpu;
-		__entry->curr = curr;
-		__entry->max = max;
-	),
-
-	TP_printk("cpu=%d curr=%lu max=%lu",
-			__entry->dst_cpu, __entry->curr, __entry->max)
-);
-/*
  * Tracepoint for showing priority inheritance modifying a tasks
  * priority.
  */

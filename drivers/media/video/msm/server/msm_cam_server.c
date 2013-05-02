@@ -385,12 +385,18 @@ static int msm_server_control(struct msm_cam_server_dev *server_dev,
 			mutex_unlock(&server_dev->server_queue_lock);
 			pr_err("%s: wait_event error %d\n", __func__, rc);
 			return rc;
+		} else {
+			pr_err("%s: List is empty\n", __func__);
+			return -EINVAL;
 		}
 	}
 	mutex_unlock(&server_dev->server_queue_lock);
 
 	rcmd = msm_dequeue(queue, list_control);
-	BUG_ON(!rcmd);
+	if (!rcmd) {
+		pr_err("%s: List is empty\n", __func__);
+		return -EINVAL;
+	}
 	D("%s Finished servicing ioctl\n", __func__);
 
 	ctrlcmd = (struct msm_ctrl_cmd *)(rcmd->command);

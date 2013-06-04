@@ -1353,12 +1353,14 @@ static void do_dbs_timer(struct work_struct *work)
 			rq_persist_count--;
 
 #ifdef CONFIG_CPUFREQ_ID_PERFLOCK
-	if (num_online_cpus() >= 2) {
-		if (saved_policy_min != 0)
-			policy->min = saved_policy_min;
-	} else if (num_online_cpus() == 1) {
-		saved_policy_min = policy->min;
-		policy->min = DBS_PERFLOCK_MIN_FREQ;
+	if (cpu == 0) {
+		if (num_online_cpus() >= 2) {
+			if (saved_policy_min != 0)
+				policy->min = saved_policy_min;
+		} else if (num_online_cpus() == 1) {
+			saved_policy_min = policy->min;
+			policy->min = DBS_PERFLOCK_MIN_FREQ;
+		}
 	}
 #endif
 

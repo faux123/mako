@@ -142,7 +142,9 @@ extern unsigned long nr_iowait(void);
 extern unsigned long avg_nr_running(void);
 extern unsigned long nr_iowait_cpu(int cpu);
 extern unsigned long this_cpu_load(void);
-
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+extern unsigned long this_cpu_loadx(int i);
+#endif
 
 extern void calc_global_load(unsigned long ticks);
 

@@ -4356,7 +4356,7 @@ static inline void update_sg_lb_stats(struct sched_domain *sd,
 			int local_group, const struct cpumask *cpus,
 			int *balance, struct sg_lb_stats *sgs)
 {
-	unsigned long load, max_cpu_load, min_cpu_load, max_nr_running;
+	unsigned long scaled_load, load, max_cpu_load, min_cpu_load, max_nr_running;
 	int i;
 	unsigned int balance_cpu = -1, first_idle_cpu = 0;
 	unsigned long avg_load_per_task = 0;
@@ -4382,12 +4382,14 @@ static inline void update_sg_lb_stats(struct sched_domain *sd,
 			load = target_load(i, load_idx);
 		} else {
 			load = source_load(i, load_idx);
-			if (load > max_cpu_load) {
-				max_cpu_load = load;
+			scaled_load = load * SCHED_POWER_SCALE
+					/ cpu_rq(i)->cpu_power;
+			if (scaled_load > max_cpu_load) {
+				max_cpu_load = scaled_load;
 				max_nr_running = rq->nr_running;
 			}
-			if (min_cpu_load > load)
-				min_cpu_load = load;
+			if (min_cpu_load > scaled_load)
+				min_cpu_load = scaled_load;
 		}
 
 		sgs->group_load += load;
@@ -4429,8 +4431,11 @@ static inline void update_sg_lb_stats(struct sched_domain *sd,
 	 *      normalized nr_running number somewhere that negates
 	 *      the hierarchy?
 	 */
-	if (sgs->sum_nr_running)
-		avg_load_per_task = sgs->sum_weighted_load / sgs->sum_nr_running;
+	if (sgs->sum_nr_running) {
+		avg_load_per_task = sgs->sum_weighted_load * SCHED_POWER_SCALE
+					/ group->sgp->power;
+		avg_load_per_task /= sgs->sum_nr_running;
+	}
 
 	if ((max_cpu_load - min_cpu_load) >= avg_load_per_task && max_nr_running > 1)
 		sgs->group_imb = 1;

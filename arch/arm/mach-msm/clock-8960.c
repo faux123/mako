@@ -560,7 +560,11 @@ static struct pll_clk pll15_clk = {
 	.parent = &pxo_clk.c,
 	.c = {
 		.dbg_name = "pll15_clk",
+#ifdef CONFIG_GPU_OVERCLOCK
+		.rate = 900000000,
+#else
 		.rate = 975000000,
+#endif
 		.ops = &clk_ops_local_pll,
 		CLK_INIT(pll15_clk.c),
 		.warned = true,
@@ -3499,8 +3503,14 @@ static struct clk_freq_tbl clk_tbl_gfx3d[] = {
 	F_GFX3D(228571000, pll2,  2,  7),
 	F_GFX3D(266667000, pll2,  1,  3),
 	F_GFX3D(320000000, pll2,  2,  5),
+#ifdef CONFIG_GPU_OVERCLOCK
+	F_GFX3D(360000000, pll15, 2,  5),
+#endif
 	F_GFX3D(400000000, pll2,  1,  2),
-	F_GFX3D(487500000, pll15, 1,  2),
+#ifdef CONFIG_GPU_OVERCLOCK
+	F_GFX3D(450000000, pll15, 1,  2),
+	F_GFX3D(600000000, pll15, 2,  3),
+#endif
 	F_END
 };
 
@@ -3534,8 +3544,8 @@ static unsigned long fmax_gfx3d_8064ab[MAX_VDD_LEVELS] __initdata = {
 static unsigned long fmax_gfx3d_8064[MAX_VDD_LEVELS] __initdata = {
 	[VDD_DIG_LOW]     = 128000000,
 #ifdef CONFIG_GPU_OVERCLOCK
-	[VDD_DIG_NOMINAL] = 400000000,
-	[VDD_DIG_HIGH]    = 487500000
+	[VDD_DIG_NOMINAL] = 360000000,
+	[VDD_DIG_HIGH]    = 600000000
 #else
 	[VDD_DIG_NOMINAL] = 320000000,
 	[VDD_DIG_HIGH]    = 400000000
@@ -6237,9 +6247,16 @@ static struct pll_config_regs pll15_regs __initdata = {
 };
 
 static struct pll_config pll15_config __initdata = {
+#ifdef CONFIG_GPU_OVERCLOCK
+        /* Program PLL15 to 900MHZ */
+	.l = (0x21 | BVAL(31, 7, 0x620)),
+	.m = 0x1,
+	.n = 0x3,
+#else
 	.l = (0x24 | BVAL(31, 7, 0x620)),
 	.m = 0x1,
 	.n = 0x9,
+#endif
 	.vco_val = BVAL(17, 16, 0x2),
 	.vco_mask = BM(17, 16),
 	.pre_div_val = 0x0,

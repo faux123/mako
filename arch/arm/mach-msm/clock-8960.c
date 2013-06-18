@@ -385,7 +385,7 @@ static int set_vdd_dig_8960(struct clk_vdd_class *vdd_class, int level)
 		[VDD_DIG_NONE]    =       0,
 		[VDD_DIG_LOW]     =  945000,
 #ifdef CONFIG_GPU_OVERCLOCK
-		[VDD_DIG_NOMINAL] = 1150000,
+		[VDD_DIG_NOMINAL] = 1050000,
 #else
 		[VDD_DIG_NOMINAL] = 1050000,
 #endif

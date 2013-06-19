@@ -119,6 +119,42 @@ static void tz_wake(struct kgsl_device *device, struct kgsl_pwrscale *pwrscale)
 					device->pwrctrl.default_pwrlevel);
 }
 
+#ifdef CONFIG_MSM_KGSL_SIMPLE_GOV
+/* KGSL Simple GPU Governor */
+/* Copyright (c) 2011-2013, Paul Reioux (Faux123). All rights reserved. */
+static int lazyness = 5;
+
+static int simple_governor(struct kgsl_device *device, int idle_stat)
+{
+	int val = 0;
+	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
+
+	/* it's currently busy */
+	if (idle_stat < 6000) {
+		if (pwr->active_pwrlevel == 0)
+			val = 0; /* already maxed, so do nothing */
+		else if ((pwr->active_pwrlevel > 0) &&
+			(pwr->active_pwrlevel <= (pwr->num_pwrlevels - 1)))
+			val = -1; /* bump up to next pwrlevel */
+	/* idle case */
+	} else {
+		if ((pwr->active_pwrlevel >= 0) &&
+			(pwr->active_pwrlevel < (pwr->num_pwrlevels - 1)))
+			if (lazyness > 0) {
+				/* hold off for a while */
+				lazyness--;
+				val = 0; /* don't change anything yet */
+			} else {
+				val = 1; /* above min, lower it */
+				lazyness = 5; /* reset lazyness count */
+			}
+		else if (pwr->active_pwrlevel == (pwr->num_pwrlevels - 1))
+			val = 0; /* already @ min, so do nothing */
+	}
+	return val;
+}
+#endif
+
 static void tz_idle(struct kgsl_device *device, struct kgsl_pwrscale *pwrscale,
 						unsigned int ignore_idle)
 {
@@ -157,10 +193,17 @@ static void tz_idle(struct kgsl_device *device, struct kgsl_pwrscale *pwrscale,
 
 	idle = stats.total_time - stats.busy_time;
 	idle = (idle > 0) ? idle : 0;
+#ifdef CONFIG_MSM_KGSL_SIMPLE_GOV
+	val = simple_governor(device, idle);
+#else
 	val = __secure_tz_entry(TZ_UPDATE_ID, idle, device->id);
-	if (val)
+#endif
+	if (val) {
 		kgsl_pwrctrl_pwrlevel_change(device,
 					     pwr->active_pwrlevel + val);
+		//pr_info("TZ idle stat: %d, TZ PL: %d, TZ out: %d\n",
+		//		idle, pwr->active_pwrlevel, val);
+	}
 }
 
 static void tz_busy(struct kgsl_device *device,

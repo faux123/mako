@@ -62,6 +62,8 @@
 
 #define MAX_SCAN_NO 2048
 #define SOFT_RECLAIM_ONETIME 1024
+#define HIDDEN_CGROUP_NAME	"hidden"
+#define RTCC_CGROUP_NAME	"rtcc"
 #endif
 
 struct cgroup_subsys mem_cgroup_subsys __read_mostly;
@@ -85,6 +87,7 @@ static int really_do_swap_account __initdata = 0;
 
 #ifdef CONFIG_ZRAM_FOR_ANDROID
 extern void need_soft_reclaim(void);
+extern int hidden_cgroup_counter;
 #endif /* CONFIG_ZRAM_FOR_ANDROID */
 
 /*
@@ -5031,11 +5034,8 @@ mem_cgroup_create(struct cgroup *cont)
 	if (parent)
 		memcg->swappiness = mem_cgroup_swappiness(parent);
 	atomic_set(&memcg->refcnt, 1);
-#ifndef CONFIG_ZRAM_FOR_ANDROID
+
 	memcg->move_charge_at_immigrate = 0;
-#else
-	memcg->move_charge_at_immigrate = 1;
-#endif /* CONFIG_ZRAM_FOR_ANDROID */
 
 	mutex_init(&memcg->thresholds_lock);
 	spin_lock_init(&memcg->move_lock);
@@ -5434,6 +5434,52 @@ static void mem_cgroup_clear_mc(void)
 	spin_unlock(&mc.lock);
 	mem_cgroup_end_move(from);
 }
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+static struct mem_cgroup *rtcc_memcgrp = NULL;
+static struct mem_cgroup *hidden_memcgrp = NULL;
+static struct cgroup *get_compcache_group(const char *grp_name)
+{
+	struct cgroup_subsys_state *css = NULL;
+	int found = 0;
+	int nextid;
+
+	rcu_read_lock();
+
+	for (nextid = 0; nextid < 4; nextid++) {
+		css = css_get_next(&mem_cgroup_subsys, nextid, &root_mem_cgroup->css, &found);
+		if (!css)
+			break;
+		if (!strcmp(css->cgroup->dentry->d_iname, grp_name))
+			goto out;
+	}
+
+	rcu_read_unlock();
+	return NULL;
+
+out:
+	rcu_read_unlock();
+	return css->cgroup;
+}
+
+static struct mem_cgroup *get_compcache_memgrp(void)
+{
+	struct cgroup *cg= get_compcache_group(RTCC_CGROUP_NAME);
+	if (!cg)
+		return NULL;
+
+	return (mem_cgroup_from_cont(cg));
+}
+
+static struct mem_cgroup *get_hiddencgrp_memgrp(void)
+{
+	struct cgroup *cg= get_compcache_group(HIDDEN_CGROUP_NAME);
+	if (!cg)
+		return NULL;
+
+	return (mem_cgroup_from_cont(cg));
+}
+
+#endif /* CONFIG_ZRAM_FOR_ANDROID */
 
 static int mem_cgroup_can_attach(struct cgroup *cgroup,
 				 struct cgroup_taskset *tset)
@@ -5441,6 +5487,17 @@ static int mem_cgroup_can_attach(struct cgroup *cgroup,
 	struct task_struct *p = cgroup_taskset_first(tset);
 	int ret = 0;
 	struct mem_cgroup *memcg = mem_cgroup_from_cont(cgroup);
+
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+	if (hidden_memcgrp == memcg) {
+		hidden_cgroup_counter ++;
+	} else if (hidden_memcgrp == NULL) {
+		hidden_memcgrp = get_hiddencgrp_memgrp();
+		if (hidden_memcgrp == memcg) {
+			hidden_cgroup_counter ++;
+		}
+	}
+#endif /* CONFIG_ZRAM_FOR_ANDROID */
 
 	if (memcg->move_charge_at_immigrate) {
 		struct mm_struct *mm;
@@ -5624,33 +5681,6 @@ retry:
 	up_read(&mm->mmap_sem);
 }
 
-#ifdef CONFIG_ZRAM_FOR_ANDROID
-static struct cgroup *get_compcache_group(void)
-{
-	struct cgroup_subsys_state *css = NULL;
-	int found = 0;
-
-	rcu_read_lock();
-	css = css_get_next(&mem_cgroup_subsys, 2, &root_mem_cgroup->css, &found);
-	rcu_read_unlock();
-
-	if (!css)
-		return NULL;
-	return (css->cgroup);
-}
-
-static struct mem_cgroup *get_compcache_memgrp(void)
-{
-	struct cgroup *cg= get_compcache_group();
-	if (!cg)
-		return NULL;
-
-	return (mem_cgroup_from_cont(cg));
-}
-
-static struct mem_cgroup *compcache_grp = NULL;
-#endif /* CONFIG_ZRAM_FOR_ANDROID */
-
 static void mem_cgroup_move_task(struct cgroup *cont,
 				 struct cgroup_taskset *tset)
 {
@@ -5665,11 +5695,11 @@ static void mem_cgroup_move_task(struct cgroup *cont,
 	}
 
 #ifdef CONFIG_ZRAM_FOR_ANDROID
-	if (compcache_grp == mc.to) {
+	if (mc.to && rtcc_memcgrp == mc.to) {
 		need_soft_reclaim();
 	}
-	else if (compcache_grp == NULL) {
-		compcache_grp = get_compcache_memgrp();
+	else if (rtcc_memcgrp == NULL) {
+		rtcc_memcgrp = get_compcache_memgrp();
 	}
 #endif /* CONFIG_ZRAM_FOR_ANDROID */
 

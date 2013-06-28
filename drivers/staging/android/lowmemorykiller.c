@@ -54,7 +54,7 @@
 #define MIN_FREESWAP_PAGES 8192 /* 32MB */
 #define MIN_RECLAIM_PAGES 512  /* 2MB */
 #define MIN_CSWAP_INTERVAL (10*HZ)  /* 10 senconds */
-
+#define RTCC_DAEMON_PROC "rtccd"
 #define _KCOMPCACHE_DEBUG 0
 #if _KCOMPCACHE_DEBUG
 #define lss_dbg(x...) printk("lss: " x)
@@ -73,7 +73,9 @@ struct soft_reclaim {
 	atomic_t need_to_reclaim;
 	atomic_t lmk_running;
 	atomic_t kcompcached_enable;
+	atomic_t idle_report;
 	struct task_struct *kcompcached;
+	struct task_struct *rtcc_daemon;
 };
 
 static struct soft_reclaim s_reclaim = {
@@ -84,9 +86,9 @@ static struct soft_reclaim s_reclaim = {
 	.nr_empty_reclaimed = 0,
 	.kcompcached = NULL,
 };
-
 extern atomic_t kswapd_thread_on;
 static unsigned long prev_jiffy;
+int hidden_cgroup_counter = 0;
 static uint32_t minimum_freeswap_pages = MIN_FREESWAP_PAGES;
 static uint32_t minimun_reclaim_pages = MIN_RECLAIM_PAGES;
 static uint32_t minimum_interval_time = MIN_CSWAP_INTERVAL;
@@ -410,8 +412,7 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 #ifdef CONFIG_ZRAM_FOR_ANDROID
 void could_cswap(void)
 {
-
-	if (atomic_read(&s_reclaim.need_to_reclaim) != 1)
+	if((hidden_cgroup_counter <= 0) && (atomic_read(&s_reclaim.need_to_reclaim) != 1))
 		return;
 
 	if (time_before(jiffies, prev_jiffy + minimum_interval_time))
@@ -430,11 +431,26 @@ void could_cswap(void)
 		return;
 
 	if (idle_cpu(task_cpu(s_reclaim.kcompcached)) && this_cpu_loadx(4) == 0) {
+		if ((atomic_read(&s_reclaim.idle_report) == 1) && (hidden_cgroup_counter > 0)) {
+			if(s_reclaim.rtcc_daemon){
+				send_sig(SIGUSR1, s_reclaim.rtcc_daemon, 0);
+				hidden_cgroup_counter -- ;
+				atomic_set(&s_reclaim.idle_report, 0);
+				prev_jiffy = jiffies;
+				return;
+			}
+		}
+
+		if (atomic_read(&s_reclaim.need_to_reclaim) != 1) {
+			atomic_set(&s_reclaim.idle_report, 1);
+			return;
+		}
+
 		if (atomic_read(&s_reclaim.kcompcached_running) == 0) {
-			lss_dbg("wakeup kcompcached\n");
 			wake_up_process(s_reclaim.kcompcached);
-			prev_jiffy = jiffies;
 			atomic_set(&s_reclaim.kcompcached_running, 1);
+			atomic_set(&s_reclaim.idle_report, 1);
+			prev_jiffy = jiffies;
 		}
 	}
 }
@@ -521,6 +537,36 @@ static int do_compcache(void * nothing)
 
 	return 0;
 }
+static ssize_t rtcc_daemon_store(struct class *class, struct class_attribute *attr,
+			const char *buf, size_t count)
+{
+	struct task_struct *p;
+	pid_t pid;
+	long val = -1;
+	long magic_sign = -1;
+
+	sscanf(buf, "%ld,%ld", &val, &magic_sign);
+
+	if (val < 0 || ((val * val - 1) != magic_sign)) {
+		pr_warning("Invalid rtccd pid\n");
+		goto out;
+	}
+
+	pid = (pid_t)val;
+	for_each_process(p) {
+		if ((pid == p->pid) && strstr(p->comm, RTCC_DAEMON_PROC)) {
+			s_reclaim.rtcc_daemon = p;
+			atomic_set(&s_reclaim.idle_report, 1);
+			goto out;
+		}
+	}
+	pr_warning("No found rtccd at pid %d!\n", pid);
+
+out:
+	return count;
+}
+static CLASS_ATTR(rtcc_daemon, 0200, NULL, rtcc_daemon_store);
+static struct class *kcompcache_class;
 #endif /* CONFIG_ZRAM_FOR_ANDROID */
 
 static struct shrinker lowmem_shrinker = {
@@ -532,6 +578,16 @@ static int __init lowmem_init(void)
 {
 	register_shrinker(&lowmem_shrinker);
 #ifdef CONFIG_ZRAM_FOR_ANDROID
+	kcompcache_class = class_create(THIS_MODULE, "kcompcache");
+	if (IS_ERR(kcompcache_class)) {
+		pr_err("%s: couldn't create kcompcache sysfs class.\n", __func__);
+		goto error_create_kcompcache_class;
+	}
+	if (class_create_file(kcompcache_class, &class_attr_rtcc_daemon) < 0) {
+		pr_err("%s: couldn't create rtcc daemon sysfs file.\n", __func__);
+		goto error_create_rtcc_daemon_class_file;
+	}
+
 	s_reclaim.kcompcached = kthread_run(do_compcache, NULL, "kcompcached");
 	if (IS_ERR(s_reclaim.kcompcached)) {
 		/* failure at boot is fatal */
@@ -540,8 +596,14 @@ static int __init lowmem_init(void)
 	set_user_nice(s_reclaim.kcompcached, 0);
 	atomic_set(&s_reclaim.need_to_reclaim, 0);
 	atomic_set(&s_reclaim.kcompcached_running, 0);
+	atomic_set(&s_reclaim.idle_report, 0);
 	enable_soft_reclaim();
 	prev_jiffy = jiffies;
+	return 0;
+error_create_rtcc_daemon_class_file:
+	class_remove_file(kcompcache_class, &class_attr_rtcc_daemon);
+error_create_kcompcache_class:
+	class_destroy(kcompcache_class);
 #endif
 
 	return 0;
@@ -555,6 +617,10 @@ static void __exit lowmem_exit(void)
 		cancel_soft_reclaim();
 		kthread_stop(s_reclaim.kcompcached);
 		s_reclaim.kcompcached = NULL;
+	}
+	if (kcompcache_class) {
+		class_remove_file(kcompcache_class, &class_attr_rtcc_daemon);
+		class_destroy(kcompcache_class);
 	}
 #endif
 }

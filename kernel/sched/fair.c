@@ -4201,15 +4201,22 @@ unsigned long __weak arch_scale_smt_power(struct sched_domain *sd, int cpu)
 unsigned long scale_rt_power(int cpu)
 {
 	struct rq *rq = cpu_rq(cpu);
-	u64 total, available;
+	u64 total, available, age_stamp, avg;
 
-	total = sched_avg_period() + (rq->clock - rq->age_stamp);
+	/*
+	 * Since we're reading these variables without serialization make sure
+	 * we read them once before doing sanity checks on them.
+	 */
+	age_stamp = ACCESS_ONCE(rq->age_stamp);
+	avg = ACCESS_ONCE(rq->rt_avg);
 
-	if (unlikely(total < rq->rt_avg)) {
+	total = sched_avg_period() + (rq->clock - age_stamp);
+
+	if (unlikely(total < avg)) {
 		/* Ensures that power won't end up being negative */
 		available = 0;
 	} else {
-		available = total - rq->rt_avg;
+		available = total - avg;
 	}
 
 	if (unlikely((s64)total < SCHED_POWER_SCALE))
@@ -4352,7 +4359,7 @@ static inline void update_sg_lb_stats(struct sched_domain *sd,
 			int local_group, const struct cpumask *cpus,
 			int *balance, struct sg_lb_stats *sgs)
 {
-	unsigned long load, max_cpu_load, min_cpu_load, max_nr_running;
+	unsigned long scaled_load, load, max_cpu_load, min_cpu_load, max_nr_running;
 	int i;
 	unsigned int balance_cpu = -1, first_idle_cpu = 0;
 	unsigned long avg_load_per_task = 0;
@@ -4378,12 +4385,14 @@ static inline void update_sg_lb_stats(struct sched_domain *sd,
 			load = target_load(i, load_idx);
 		} else {
 			load = source_load(i, load_idx);
-			if (load > max_cpu_load) {
-				max_cpu_load = load;
+			scaled_load = load * SCHED_POWER_SCALE
+					/ cpu_rq(i)->cpu_power;
+			if (scaled_load > max_cpu_load) {
+				max_cpu_load = scaled_load;
 				max_nr_running = rq->nr_running;
 			}
-			if (min_cpu_load > load)
-				min_cpu_load = load;
+			if (min_cpu_load > scaled_load)
+				min_cpu_load = scaled_load;
 		}
 
 		sgs->group_load += load;
@@ -4425,8 +4434,11 @@ static inline void update_sg_lb_stats(struct sched_domain *sd,
 	 *      normalized nr_running number somewhere that negates
 	 *      the hierarchy?
 	 */
-	if (sgs->sum_nr_running)
-		avg_load_per_task = sgs->sum_weighted_load / sgs->sum_nr_running;
+	if (sgs->sum_nr_running) {
+		avg_load_per_task = sgs->sum_weighted_load * SCHED_POWER_SCALE
+					/ group->sgp->power;
+		avg_load_per_task /= sgs->sum_nr_running;
+	}
 
 	if ((max_cpu_load - min_cpu_load) >= avg_load_per_task && max_nr_running > 1)
 		sgs->group_imb = 1;
@@ -4618,7 +4630,7 @@ static inline void fix_small_imbalance(struct sd_lb_stats *sds,
 {
 	unsigned long tmp, pwr_now = 0, pwr_move = 0;
 	unsigned int imbn = 2;
-	unsigned long scaled_busy_load_per_task;
+	unsigned long scaled_busy_load_per_task, scaled_this_load_per_task;
 
 	if (sds->this_nr_running) {
 		sds->this_load_per_task /= sds->this_nr_running;
@@ -4639,6 +4651,9 @@ static inline void fix_small_imbalance(struct sd_lb_stats *sds,
 		return;
 	}
 
+	scaled_this_load_per_task = sds->this_load_per_task
+					 * SCHED_POWER_SCALE;
+	scaled_this_load_per_task /= sds->this->sgp->power;
 	/*
 	 * OK, we don't have enough imbalance to justify moving tasks,
 	 * however we may be able to increase total CPU power used by
@@ -4646,31 +4661,35 @@ static inline void fix_small_imbalance(struct sd_lb_stats *sds,
 	 */
 
 	pwr_now += sds->busiest->sgp->power *
-			min(sds->busiest_load_per_task, sds->max_load);
+			min(scaled_busy_load_per_task, sds->max_load);
 	pwr_now += sds->this->sgp->power *
-			min(sds->this_load_per_task, sds->this_load);
+			min(scaled_this_load_per_task, sds->this_load);
 	pwr_now /= SCHED_POWER_SCALE;
 
 	/* Amount of load we'd subtract */
-	tmp = (sds->busiest_load_per_task * SCHED_POWER_SCALE) /
-		sds->busiest->sgp->power;
-	if (sds->max_load > tmp)
+	if (sds->max_load > scaled_busy_load_per_task) {
 		pwr_move += sds->busiest->sgp->power *
-			min(sds->busiest_load_per_task, sds->max_load - tmp);
+			min(scaled_busy_load_per_task,
+				sds->max_load - scaled_busy_load_per_task);
+		tmp = scaled_busy_load_per_task;
+	} else
+		tmp = sds->max_load;
 
+	/* Scale to this queue from busiest queue */
+	tmp = (tmp * sds->busiest->sgp->power) /
+		sds->this->sgp->power;
 	/* Amount of load we'd add */
-	if (sds->max_load * sds->busiest->sgp->power <
-		sds->busiest_load_per_task * SCHED_POWER_SCALE)
-		tmp = (sds->max_load * sds->busiest->sgp->power) /
-			sds->this->sgp->power;
-	else
-		tmp = (sds->busiest_load_per_task * SCHED_POWER_SCALE) /
-			sds->this->sgp->power;
 	pwr_move += sds->this->sgp->power *
-			min(sds->this_load_per_task, sds->this_load + tmp);
+			min(scaled_this_load_per_task, sds->this_load + tmp);
 	pwr_move /= SCHED_POWER_SCALE;
 
 	/* Move if we gain throughput */
+	/*
+	 * The only possibilty for below statement be true, is:
+	 * sds->max_load is larger than scaled_busy_load_per_task, while,
+	 * scaled_this_load_per_task is larger than sds->this_load plus by
+	 * the scaled scaled_busy_load_per_task moved into this queue
+	 */
 	if (pwr_move > pwr_now)
 		*imbalance = sds->busiest_load_per_task;
 }

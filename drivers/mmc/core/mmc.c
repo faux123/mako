@@ -817,6 +817,69 @@ err:
 	return err;
 }
 
+/**
+ * mmc_change_bus_speed() - Change MMC card bus frequency at runtime
+ * @host: pointer to mmc host structure
+ * @freq: pointer to desired frequency to be set
+ *
+ * Change the MMC card bus frequency at runtime after the card is
+ * initialized. Callers are expected to make sure of the card's
+ * state (DATA/RCV/TRANSFER) beforing changing the frequency at runtime.
+ *
+ * If the frequency to change is greater than max. supported by card,
+ * *freq is changed to max. supported by card and if it is less than min.
+ * supported by host, *freq is changed to min. supported by host.
+ */
+static int mmc_change_bus_speed(struct mmc_host *host, unsigned long *freq)
+{
+	int err = 0;
+	struct mmc_card *card;
+
+	mmc_claim_host(host);
+	/*
+	 * Assign card pointer after claiming host to avoid race
+	 * conditions that may arise during removal of the card.
+	 */
+	card = host->card;
+
+	if (!card || !freq) {
+		err = -EINVAL;
+		goto out;
+	}
+
+	if (mmc_card_highspeed(card) || mmc_card_hs200(card)
+			|| mmc_card_ddr_mode(card)) {
+		if (*freq > card->ext_csd.hs_max_dtr)
+			*freq = card->ext_csd.hs_max_dtr;
+	} else if (*freq > card->csd.max_dtr) {
+		*freq = card->csd.max_dtr;
+	}
+
+	if (*freq < host->f_min)
+		*freq = host->f_min;
+
+	mmc_set_clock(host, (unsigned int) (*freq));
+
+	if (mmc_card_hs200(card) && card->host->ops->execute_tuning) {
+		/*
+		 * We try to probe host driver for tuning for any
+		 * frequency, it is host driver responsibility to
+		 * perform actual tuning only when required.
+		 */
+		mmc_host_clk_hold(card->host);
+		err = card->host->ops->execute_tuning(card->host,
+				MMC_SEND_TUNING_BLOCK_HS200);
+		mmc_host_clk_release(card->host);
+
+		if (err)
+			pr_warn("%s: %s: tuning execution failed %d\n",
+				   mmc_hostname(card->host), __func__, err);
+	}
+out:
+	mmc_release_host(host);
+	return err;
+}
+
 /*
  * Handle the detection and initialisation of a card.
  *
@@ -1373,6 +1436,7 @@ static void mmc_remove(struct mmc_host *host)
 
 	mmc_claim_host(host);
 	host->card = NULL;
+	mmc_exit_clk_scaling(host);
 	mmc_release_host(host);
 }
 
@@ -1423,6 +1487,12 @@ static int mmc_suspend(struct mmc_host *host)
 	BUG_ON(!host);
 	BUG_ON(!host->card);
 
+	/*
+	 * Disable clock scaling before suspend and enable it after resume so
+	 * as to avoid clock scaling decisions kicking in during this window.
+	 */
+	mmc_disable_clk_scaling(host);
+
 	mmc_claim_host(host);
 	if (mmc_can_poweroff_notify(host->card) &&
 		(host->caps2 & MMC_CAP2_POWER_OFF_VCCQ_DURING_SUSPEND)) {
@@ -1466,6 +1536,13 @@ static int mmc_resume(struct mmc_host *host)
 	err = mmc_init_card(host, host->ocr, host->card);
 	mmc_release_host(host);
 
+	/*
+	 * We have done full initialization of the card,
+	 * reset the clk scale stats and current frequency.
+	 */
+	if (mmc_can_scale_clk(host))
+		mmc_init_clk_scaling(host);
+
 	return err;
 }
 
@@ -1473,11 +1550,17 @@ static int mmc_power_restore(struct mmc_host *host)
 {
 	int ret;
 
+	/* Disable clk scaling to avoid switching frequencies intermittently */
+	mmc_disable_clk_scaling(host);
+
 	host->card->state &= ~(MMC_STATE_HIGHSPEED | MMC_STATE_HIGHSPEED_200);
 	mmc_card_clr_sleep(host->card);
 	mmc_claim_host(host);
 	ret = mmc_init_card(host, host->ocr, host->card);
 	mmc_release_host(host);
+
+	if (mmc_can_scale_clk(host))
+		mmc_init_clk_scaling(host);
 
 	return ret;
 }
@@ -1522,6 +1605,7 @@ static const struct mmc_bus_ops mmc_ops = {
 	.power_restore = mmc_power_restore,
 	.alive = mmc_alive,
 	.poweroff_notify = mmc_poweroff_notify,
+	.change_bus_speed = mmc_change_bus_speed,
 };
 
 static const struct mmc_bus_ops mmc_ops_unsafe = {
@@ -1534,6 +1618,7 @@ static const struct mmc_bus_ops mmc_ops_unsafe = {
 	.power_restore = mmc_power_restore,
 	.alive = mmc_alive,
 	.poweroff_notify = mmc_poweroff_notify,
+	.change_bus_speed = mmc_change_bus_speed,
 };
 
 static void mmc_attach_bus_ops(struct mmc_host *host)
@@ -1612,6 +1697,8 @@ int mmc_attach_mmc(struct mmc_host *host)
 	mmc_claim_host(host);
 	if (err)
 		goto remove_card;
+
+	mmc_init_clk_scaling(host);
 
 	return 0;
 

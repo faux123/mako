@@ -185,8 +185,10 @@ static struct acpu_level tbl_slow[] __initdata = {
 	{ 1, {  1620000, HFPLL, 1, 0x3C }, L2(15), 1300000 },
 	{ 1, {  1728000, HFPLL, 1, 0x40 }, L2(15), 1350000 },
 	{ 1, {  1836000, HFPLL, 1, 0x44 }, L2(15), 1400000 },
+#ifdef CONFIG_OC_ULTIMATE
 	{ 1, {  1890000, HFPLL, 1, 0x45 }, L2(15), 1425000 },
 	{ 1, {  1944000, HFPLL, 1, 0x46 }, L2(15), 1450000 },
+#endif
 #endif
 	{ 0, { 0 } }
 };
@@ -225,8 +227,10 @@ static struct acpu_level tbl_nom[] __initdata = {
 	{ 1, {  1620000, HFPLL, 1, 0x3C }, L2(15), 1250000 },
 	{ 1, {  1728000, HFPLL, 1, 0x40 }, L2(15), 1300000 },
 	{ 1, {  1836000, HFPLL, 1, 0x44 }, L2(15), 1350000 },
+#ifdef CONFIG_OC_ULTIMATE
 	{ 1, {  1890000, HFPLL, 1, 0x45 }, L2(15), 1375000 },
 	{ 1, {  1944000, HFPLL, 1, 0x46 }, L2(15), 1400000 },
+#endif
 #endif
 	{ 0, { 0 } }
 };
@@ -265,8 +269,10 @@ static struct acpu_level tbl_fast[] __initdata = {
 	{ 1, {  1620000, HFPLL, 1, 0x3C }, L2(15), 1200000 },
 	{ 1, {  1728000, HFPLL, 1, 0x40 }, L2(15), 1250000 },
 	{ 1, {  1836000, HFPLL, 1, 0x44 }, L2(15), 1300000 },
+#ifdef CONFIG_OC_ULTIMATE
 	{ 1, {  1890000, HFPLL, 1, 0x45 }, L2(15), 1325000 },
 	{ 1, {  1944000, HFPLL, 1, 0x46 }, L2(15), 1350000 },
+#endif
 #endif
 	{ 0, { 0 } }
 };
@@ -305,8 +311,10 @@ static struct acpu_level tbl_faster[] __initdata = {
 	{ 1, {  1620000, HFPLL, 1, 0x3C }, L2(15), 1150000 },
 	{ 1, {  1728000, HFPLL, 1, 0x40 }, L2(15), 1200000 },
 	{ 1, {  1836000, HFPLL, 1, 0x44 }, L2(15), 1250000 },
+#ifdef CONFIG_OC_ULTIMATE
 	{ 1, {  1890000, HFPLL, 1, 0x45 }, L2(15), 1275000 },
 	{ 1, {  1944000, HFPLL, 1, 0x46 }, L2(15), 1300000 },
+#endif
 #endif
 	{ 0, { 0 } }
 };

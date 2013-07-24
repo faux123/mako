@@ -34,6 +34,10 @@
 
 #include <linux/input/lge_touch_core.h>
 
+#ifdef CONFIG_TOUCHSCREEN_SWEEP2WAKE
+#include <linux/input/sweep2wake.h>
+#endif
+
 struct touch_device_driver*     touch_device_func;
 struct workqueue_struct*        touch_wq;
 
@@ -86,6 +90,25 @@ static int tr_last_index;
 #if defined(CONFIG_HAS_EARLYSUSPEND)
 static void touch_early_suspend(struct early_suspend *h);
 static void touch_late_resume(struct early_suspend *h);
+#endif
+
+#ifdef CONFIG_TOUCHSCREEN_SWEEP2WAKE
+/* gives back true if only one touch is recognized */
+bool is_single_touch(struct lge_touch_data *ts)
+{
+        int i = 0, cnt = 0;
+
+        for( i = 0; i < ts->pdata->caps->max_id; i++ ) {
+                if ((!ts->ts_data.curr_data[i].state) ||
+                    (ts->ts_data.curr_data[i].state == ABS_RELEASE))
+                        continue;
+                else cnt++;
+        }
+        if (cnt == 1)
+                return true;
+        else
+                return false;
+}
 #endif
 
 /* set_touch_handle / get_touch_handle
@@ -773,6 +796,11 @@ static void touch_input_report(struct lge_touch_data *ts)
 				input_report_abs(ts->input_dev,
 					ABS_MT_TOUCH_MINOR,
 					ts->ts_data.curr_data[id].width_minor);
+
+#ifdef CONFIG_TOUCHSCREEN_SWEEP2WAKE
+                        detect_sweep2wake(ts->ts_data.curr_data[id].x_position, ts->ts_data.curr_data[id].y_position, ts);
+#endif
+
 #ifdef LGE_TOUCH_POINT_DEBUG
 			if (id == 0 && tr_last_index < MAX_TRACE) {
 				tr_data[tr_last_index].x = ts->ts_data.curr_data[id].x_position;
@@ -783,6 +811,14 @@ static void touch_input_report(struct lge_touch_data *ts)
 		}
 		else {
 			ts->ts_data.curr_data[id].state = 0;
+#ifdef CONFIG_TOUCHSCREEN_SWEEP2WAKE
+                        if (s2w_switch > 0) {
+                                exec_count = true;
+                                barrier[0] = false;
+                                barrier[1] = false;
+                                scr_on_touch = false;
+                        }
+#endif
 #ifdef LGE_TOUCH_POINT_DEBUG
 			dump_pointer_trace();
 #endif
@@ -944,7 +980,10 @@ static void touch_fw_upgrade_func(struct work_struct *work_fw_upgrade)
 #endif
 
 	if (!ts->curr_resume_state) {
-		touch_power_cntl(ts, POWER_OFF);
+#ifdef CONFIG_TOUCHSCREEN_SWEEP2WAKE
+                if (s2w_switch == 0)
+#endif
+                        touch_power_cntl(ts, POWER_OFF);
 	}
 	else {
 		if (ts->pdata->role->operation_mode == INTERRUPT_MODE)
@@ -1858,7 +1897,11 @@ static int touch_probe(struct i2c_client *client,
 
 		ret = request_threaded_irq(client->irq, touch_irq_handler,
 				NULL,
+#ifdef CONFIG_TOUCHSCREEN_SWEEP2WAKE
+				ts->pdata->role->irqflags | IRQF_ONESHOT | IRQF_TRIGGER_LOW | IRQF_NO_SUSPEND,
+#else
 				ts->pdata->role->irqflags | IRQF_ONESHOT,
+#endif
 				client->name, ts);
 
 		if (ret < 0) {
@@ -1999,6 +2042,10 @@ static void touch_early_suspend(struct early_suspend *h)
 	struct lge_touch_data *ts =
 			container_of(h, struct lge_touch_data, early_suspend);
 
+#ifdef CONFIG_TOUCHSCREEN_SWEEP2WAKE
+        scr_suspended = true;
+#endif
+
 	if (unlikely(touch_debug_mask & DEBUG_TRACE))
 		TOUCH_DEBUG_MSG("\n");
 
@@ -2009,25 +2056,38 @@ static void touch_early_suspend(struct early_suspend *h)
 		return;
 	}
 
-	if (ts->pdata->role->operation_mode == INTERRUPT_MODE)
-		disable_irq(ts->client->irq);
-	else
-		hrtimer_cancel(&ts->timer);
+#ifdef CONFIG_TOUCHSCREEN_SWEEP2WAKE
+        if (s2w_switch == 0)
+#endif
+        {
+	        if (ts->pdata->role->operation_mode == INTERRUPT_MODE)
+		                disable_irq(ts->client->irq);
+	        else
+		        hrtimer_cancel(&ts->timer);
 
-	cancel_work_sync(&ts->work);
-	cancel_delayed_work_sync(&ts->work_init);
-	if (ts->pdata->role->key_type == TOUCH_HARD_KEY)
-		cancel_delayed_work_sync(&ts->work_touch_lock);
+	        cancel_work_sync(&ts->work);
+	        cancel_delayed_work_sync(&ts->work_init);
+	        if (ts->pdata->role->key_type == TOUCH_HARD_KEY)
+		        cancel_delayed_work_sync(&ts->work_touch_lock);
 
-	release_all_ts_event(ts);
+	        release_all_ts_event(ts);
 
-	touch_power_cntl(ts, ts->pdata->role->suspend_pwr);
+	        touch_power_cntl(ts, ts->pdata->role->suspend_pwr);
+        }
+#ifdef CONFIG_TOUCHSCREEN_SWEEP2WAKE
+        else if (s2w_switch > 0)
+                enable_irq_wake(ts->client->irq);
+#endif
 }
 
 static void touch_late_resume(struct early_suspend *h)
 {
 	struct lge_touch_data *ts =
 			container_of(h, struct lge_touch_data, early_suspend);
+
+#ifdef CONFIG_TOUCHSCREEN_SWEEP2WAKE
+        scr_suspended = false;
+#endif
 
 	if (unlikely(touch_debug_mask & DEBUG_TRACE))
 		TOUCH_DEBUG_MSG("\n");
@@ -2039,20 +2099,29 @@ static void touch_late_resume(struct early_suspend *h)
 		return;
 	}
 
-	touch_power_cntl(ts, ts->pdata->role->resume_pwr);
+#ifdef CONFIG_TOUCHSCREEN_SWEEP2WAKE
+        if (s2w_switch == 0)
+#endif
+        {
+	        touch_power_cntl(ts, ts->pdata->role->resume_pwr);
 
-	if (ts->pdata->role->operation_mode == INTERRUPT_MODE)
-		enable_irq(ts->client->irq);
-	else
-		hrtimer_start(&ts->timer,
-			ktime_set(0, ts->pdata->role->report_period),
-					HRTIMER_MODE_REL);
+	        if (ts->pdata->role->operation_mode == INTERRUPT_MODE)
+		        enable_irq(ts->client->irq);
+	        else
+		        hrtimer_start(&ts->timer,
+			        ktime_set(0, ts->pdata->role->report_period),
+					        HRTIMER_MODE_REL);
 
-	if (ts->pdata->role->resume_pwr == POWER_ON)
-		queue_delayed_work(touch_wq, &ts->work_init,
-			msecs_to_jiffies(ts->pdata->role->booting_delay));
-	else
-		queue_delayed_work(touch_wq, &ts->work_init, 0);
+	        if (ts->pdata->role->resume_pwr == POWER_ON)
+		        queue_delayed_work(touch_wq, &ts->work_init,
+			        msecs_to_jiffies(ts->pdata->role->booting_delay));
+	        else
+		        queue_delayed_work(touch_wq, &ts->work_init, 0);
+        }
+#ifdef CONFIG_TOUCHSCREEN_SWEEP2WAKE
+        else if (s2w_switch > 0)
+                disable_irq_wake(ts->client->irq);
+#endif
 }
 #endif
 

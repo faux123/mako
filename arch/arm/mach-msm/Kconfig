@@ -1648,6 +1648,12 @@ config OC_ULTIMATE
 	help
 	  Unlock the ultimate Overclock freq speed @ 1.944 GHz
 
+config CPU_VOLTAGE_TABLE
+	bool "Enable CPU Voltage Table via sysfs for adjustements"
+	default n
+	help
+	  Krait User Votlage Control
+
 config MSM_AVS_HW
 	bool "Enable Adaptive Voltage Scaling (AVS)"
 	default n

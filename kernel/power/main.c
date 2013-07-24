@@ -361,7 +361,7 @@ static ssize_t state_store(struct kobject *kobj, struct kobj_attribute *attr,
 #ifdef CONFIG_EARLYSUSPEND
 	suspend_state_t state = PM_SUSPEND_ON;
 #else
-	suspend_state_t state = PM_SUSPEND_STANDBY;
+	suspend_state_t state = PM_SUSPEND_MIN;
 #endif
 	const char * const *s;
 #endif

@@ -278,6 +278,34 @@ static struct notifier_block __refdata msm_cpufreq_cpu_notifier = {
 	.notifier_call = msm_cpufreq_cpu_callback,
 };
 
+#ifdef CONFIG_CPU_FREQ_GOV_INTELLIDEMAND
+extern bool lmf_screen_state;
+#endif
+
+static void msm_cpu_early_suspend(struct early_suspend *h)
+{
+
+#ifdef CONFIG_CPU_FREQ_GOV_INTELLIDEMAND
+	lmf_screen_state = false;
+#endif
+
+}
+
+static void msm_cpu_late_resume(struct early_suspend *h)
+{
+
+#ifdef CONFIG_CPU_FREQ_GOV_INTELLIDEMAND
+	lmf_screen_state = true;
+#endif
+
+}
+
+static struct early_suspend msm_cpu_early_suspend_handler = {
+	.level = EARLY_SUSPEND_LEVEL_BLANK_SCREEN,
+	.suspend = msm_cpu_early_suspend,
+	.resume = msm_cpu_late_resume,
+};
+
 /*
  * Define suspend/resume for cpufreq_driver. Kernel will call
  * these during suspend/resume with interrupts disabled. This
@@ -334,7 +362,7 @@ static int __init msm_cpufreq_register(void)
 	}
 
 	register_hotcpu_notifier(&msm_cpufreq_cpu_notifier);
-
+	register_early_suspend(&msm_cpu_early_suspend_handler);
 	return cpufreq_register_driver(&msm_cpufreq_driver);
 }
 

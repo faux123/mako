@@ -46,7 +46,7 @@
 
 #define SECCLKAGD		BIT(4)
 
-#define FREQ_TABLE_SIZE		35
+#define FREQ_TABLE_SIZE		37
 
 static DEFINE_MUTEX(driver_lock);
 static DEFINE_SPINLOCK(l2_lock);

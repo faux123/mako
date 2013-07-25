@@ -57,6 +57,13 @@
 
 #include <trace/events/vmscan.h>
 
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+#include <linux/swap.h>
+
+#define MAX_SCAN_NO 2048
+#define SOFT_RECLAIM_ONETIME 1024
+#endif
+
 struct cgroup_subsys mem_cgroup_subsys __read_mostly;
 #define MEM_CGROUP_RECLAIM_RETRIES	5
 struct mem_cgroup *root_mem_cgroup __read_mostly;
@@ -76,6 +83,9 @@ static int really_do_swap_account __initdata = 0;
 #define do_swap_account		(0)
 #endif
 
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+extern void need_soft_reclaim(void);
+#endif /* CONFIG_ZRAM_FOR_ANDROID */
 
 /*
  * Statistics for memory cgroup.
@@ -1718,9 +1728,17 @@ static int mem_cgroup_soft_reclaim(struct mem_cgroup *root_memcg,
 		}
 		if (!mem_cgroup_reclaimable(victim, false))
 			continue;
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+		if(nr_swap_pages <= SOFT_RECLAIM_ONETIME)
+			break;
+#endif
 		total += mem_cgroup_shrink_node_zone(victim, gfp_mask, false,
 						     zone, &nr_scanned);
 		*total_scanned += nr_scanned;
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+		if(*total_scanned > MAX_SCAN_NO)
+			break;
+#endif
 		if (!res_counter_soft_limit_excess(&root_memcg->res))
 			break;
 	}
@@ -5013,7 +5031,12 @@ mem_cgroup_create(struct cgroup *cont)
 	if (parent)
 		memcg->swappiness = mem_cgroup_swappiness(parent);
 	atomic_set(&memcg->refcnt, 1);
+#ifndef CONFIG_ZRAM_FOR_ANDROID
 	memcg->move_charge_at_immigrate = 0;
+#else
+	memcg->move_charge_at_immigrate = 1;
+#endif /* CONFIG_ZRAM_FOR_ANDROID */
+
 	mutex_init(&memcg->thresholds_lock);
 	spin_lock_init(&memcg->move_lock);
 	return &memcg->css;
@@ -5601,6 +5624,33 @@ retry:
 	up_read(&mm->mmap_sem);
 }
 
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+static struct cgroup *get_compcache_group(void)
+{
+	struct cgroup_subsys_state *css = NULL;
+	int found = 0;
+
+	rcu_read_lock();
+	css = css_get_next(&mem_cgroup_subsys, 2, &root_mem_cgroup->css, &found);
+	rcu_read_unlock();
+
+	if (!css)
+		return NULL;
+	return (css->cgroup);
+}
+
+static struct mem_cgroup *get_compcache_memgrp(void)
+{
+	struct cgroup *cg= get_compcache_group();
+	if (!cg)
+		return NULL;
+
+	return (mem_cgroup_from_cont(cg));
+}
+
+static struct mem_cgroup *compcache_grp = NULL;
+#endif /* CONFIG_ZRAM_FOR_ANDROID */
+
 static void mem_cgroup_move_task(struct cgroup *cont,
 				 struct cgroup_taskset *tset)
 {
@@ -5613,6 +5663,16 @@ static void mem_cgroup_move_task(struct cgroup *cont,
 		put_swap_token(mm);
 		mmput(mm);
 	}
+
+#ifdef CONFIG_ZRAM_FOR_ANDROID
+	if (compcache_grp == mc.to) {
+		need_soft_reclaim();
+	}
+	else if (compcache_grp == NULL) {
+		compcache_grp = get_compcache_memgrp();
+	}
+#endif /* CONFIG_ZRAM_FOR_ANDROID */
+
 	if (mc.to)
 		mem_cgroup_clear_mc();
 }

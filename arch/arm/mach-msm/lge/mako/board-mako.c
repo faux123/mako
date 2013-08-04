@@ -1857,6 +1857,7 @@ static struct platform_device *cdp_devices[] __initdata = {
 #ifdef CONFIG_MSM_ROTATOR
        &msm_rotator_device,
 #endif
+	&msm8960_cpu_slp_status,
 };
 
 #ifdef CONFIG_USER_RC_INPUT

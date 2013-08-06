@@ -1645,6 +1645,15 @@ config OC_ULTIMATE
 	help
 	  Unlock the ultimate Overclock freq speed @ 1.944 GHz
 
+config TURBO_BOOST
+	bool "Enable CPU Turbo boost option"
+	depends on CPU_OVERCLOCK
+	default y
+	help
+	  This option allows overclocking of 2 cores to higher clock rate
+	  than stock maximum.  When more than 2 cores are active, the clock
+	  is limited to stock max speeds
+
 config CPU_VOLTAGE_TABLE
 	bool "Enable CPU Voltage Table via sysfs for adjustements"
 	default n

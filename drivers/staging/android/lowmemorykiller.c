@@ -284,7 +284,7 @@ static int lowmem_shrink(struct shrinker *s, struct shrink_control *sc)
 	int selected_oom_score_adj;
 	int array_size = ARRAY_SIZE(lowmem_adj);
 	int other_free;
-	int other_file;
+	int other_file = 0;
 	unsigned long nr_to_scan = sc->nr_to_scan;
 
 #ifdef CONFIG_ZRAM_FOR_ANDROID

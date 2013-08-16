@@ -1632,6 +1632,12 @@ config MSM_CPUFREQ_LIMITER
 
 	  If in doubt, say N.
 
+config GPU_OVERCLOCK
+	bool "Enable GPU Overclocking option"
+	default n
+	help
+	  APQ8064 GPU overclocking 
+
 config CPU_OVERCLOCK
 	bool "Enable CPU Overclocking option"
 	default n

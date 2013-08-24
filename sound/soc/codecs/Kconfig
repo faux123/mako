@@ -460,10 +460,3 @@ config SOUND_CONTROL_HAX_GPL
 	default y
 	help
 	  FauxSound WCD93xx chipset sound control hacks
-
-config SOUND_CONTROL_HAX_30
-	tristate "new wcd93xx sound control hax"
-	default y
-	help
-	  FauxSound WCD93xx chipset sound control hacks 3.0 for deeper hax
-

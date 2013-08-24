@@ -215,3 +215,5 @@ obj-$(CONFIG_SND_SOC_TPA6130A2)	+= snd-soc-tpa6130a2.o
 obj-$(CONFIG_SND_SOC_TPA2028D)	+= tpa2028d.o
 
 obj-$(CONFIG_SOUND_CONTROL_HAX_GPL) += sound_control_gpl.o
+obj-$(CONFIG_SOUND_CONTROL_HAX_3_GPL) += sound_control_3_gpl.o
+

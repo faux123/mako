@@ -205,6 +205,12 @@ struct cfs_bandwidth { };
 /* CFS-related fields in a runqueue */
 struct cfs_rq {
 	struct load_weight load;
+	/*
+	 * The difference between nr_running and h_nr_running is:
+	 * nr_running:   present how many entity would take part in the sharing
+	 *               the cpu power of that cfs_rq
+	 * h_nr_running: present how many tasks in current cfs runqueue
+	 */
 	unsigned int nr_running, h_nr_running;
 
 	u64 exec_clock;

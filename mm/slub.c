@@ -1503,15 +1503,18 @@ static inline void *acquire_slab(struct kmem_cache *s,
 	freelist = page->freelist;
 	counters = page->counters;
 	new.counters = counters;
-	if (mode)
+	if (mode) {
 		new.inuse = page->objects;
-
+		new.freelist = NULL;
+	} else {
+		new.freelist = freelist;
+	}
 	VM_BUG_ON(new.frozen);
 	new.frozen = 1;
 
 	if (!__cmpxchg_double_slab(s, page,
 			freelist, counters,
-			NULL, new.counters,
+			new.freelist, new.counters,
 			"acquire_slab"))
 
 		return NULL;

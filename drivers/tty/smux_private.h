@@ -15,6 +15,10 @@
 #ifndef SMUX_PRIVATE_H
 #define SMUX_PRIVATE_H
 
+#if defined (CONFIG_SLAB) || defined (CONFIG_SLOB)
+#include <linux/workqueue.h>
+#endif
+
 #define SMUX_MAX_PKT_SIZE   8192
 #define SMUX_BROADCAST_LCID 0xFF
 

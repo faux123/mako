@@ -3016,45 +3016,6 @@ static inline unsigned long effective_load(struct task_group *tg, int cpu,
 
 #endif
 
-static void record_wakee(struct task_struct *p)
-{
-	/*
-	 * Rough decay, don't worry about the boundary, really active
-	 * task won't care the loose.
-	 */
-	if (jiffies > current->last_switch_decay + HZ) {
-		current->nr_wakee_switch = 0;
-		current->last_switch_decay = jiffies;
-	}
-
-	if (current->last_wakee != p) {
-		current->last_wakee = p;
-		current->nr_wakee_switch++;
-	}
-}
-
-static int nasty_pull(struct task_struct *p)
-{
-	int factor = cpumask_weight(cpu_online_mask);
-
-	/*
-	 * Yeah, it's the switching-frequency, could means many wakee or
-	 * rapidly switch, use factor here will just help to automatically
-	 * adjust the loose-degree, so more cpu will lead to more pull.
-	 */
-	if (p->nr_wakee_switch > factor) {
-		/*
-		 * wakee is somewhat hot, it needs certain amount of cpu
-		 * resource, so if waker is far more hot, prefer to leave
-		 * it alone.
-		 */
-		if (current->nr_wakee_switch > (factor * p->nr_wakee_switch))
-			return 1;
-	}
-
-	return 0;
-}
-
 static int wake_affine(struct sched_domain *sd, struct task_struct *p, int sync)
 {
 	s64 this_load, load;
@@ -3063,9 +3024,6 @@ static int wake_affine(struct sched_domain *sd, struct task_struct *p, int sync)
 	struct task_group *tg;
 	unsigned long weight;
 	int balanced;
-
-	if (nasty_pull(p))
-		return 0;
 
 	idx	  = sd->wake_idx;
 	this_cpu  = smp_processor_id();
@@ -3447,9 +3405,6 @@ select_task_rq_fair(struct task_struct *p, int sd_flag, int wake_flags)
 		/* while loop will break here if sd == NULL */
 	}
 unlock:
-	if (sd_flag & SD_BALANCE_WAKE)
-		record_wakee(p);
-
 	rcu_read_unlock();
 
 	return new_cpu;

@@ -71,7 +71,7 @@ static ssize_t mic_gain_show(struct kobject *kobj,
 {
 	return sprintf(buf, "%u",
 		tabla_read(fauxsound_codec_ptr,
-			TABLA_A_CDC_TX7_VOL_CTL_GAIN));
+			TABLA_A_CDC_TX4_VOL_CTL_GAIN));
 }
 
 static ssize_t mic_gain_store(struct kobject *kobj,
@@ -83,7 +83,7 @@ static ssize_t mic_gain_store(struct kobject *kobj,
 
 	if (calc_checksum(lval, 0, chksum)) {
 		tabla_write(fauxsound_codec_ptr,
-			TABLA_A_CDC_TX7_VOL_CTL_GAIN, lval);
+			TABLA_A_CDC_TX4_VOL_CTL_GAIN, lval);
 	}
 	return count;
 

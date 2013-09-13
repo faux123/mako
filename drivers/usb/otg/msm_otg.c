@@ -1139,7 +1139,7 @@ static void msm_otg_notify_charger(struct msm_otg *motg, unsigned mA)
 		return;
 
 	// remove charge limit (500mA) in host mode -ziddey
-	if (otg_hack_active) {
+	if (!otg_hack_active) {
 		if ((motg->chg_type == USB_ACA_DOCK_CHARGER ||
 			motg->chg_type == USB_ACA_A_CHARGER ||
 			motg->chg_type == USB_ACA_B_CHARGER ||
@@ -1155,7 +1155,6 @@ static void msm_otg_notify_charger(struct msm_otg *motg, unsigned mA)
 
 	if (motg->cur_power == mA)
 		return;
-
 	dev_info(motg->phy.dev, "Avail curr from USB = %u\n", mA);
 
 	pm8921_charger_vbus_draw(mA);

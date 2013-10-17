@@ -22,6 +22,10 @@ extern unsigned long kexec_start_address;
 extern unsigned long kexec_indirection_page;
 extern unsigned long kexec_mach_type;
 extern unsigned long kexec_boot_atags;
+#ifdef CONFIG_KEXEC_HARDBOOT
+extern unsigned long kexec_hardboot;
+void (*kexec_hardboot_hook)(void);
+#endif
 
 static atomic_t waiting_for_crash_ipi;
 
@@ -124,6 +128,9 @@ void machine_kexec(struct kimage *image)
 	kexec_indirection_page = page_list;
 	kexec_mach_type = machine_arch_type;
 	kexec_boot_atags = image->start - KEXEC_ARM_ZIMAGE_OFFSET + KEXEC_ARM_ATAGS_OFFSET;
+#ifdef CONFIG_KEXEC_HARDBOOT
+	kexec_hardboot = image->hardboot;
+#endif
 
 	/* copy our kernel relocation code to the control code page */
 	memcpy(reboot_code_buffer,
@@ -136,6 +143,12 @@ void machine_kexec(struct kimage *image)
 
 	if (kexec_reinit)
 		kexec_reinit();
+
+#ifdef CONFIG_KEXEC_HARDBOOT
+	/* Run any final machine-specific shutdown code. */
+	if (image->hardboot && kexec_hardboot_hook)
+		kexec_hardboot_hook();
+#endif
 
 	soft_restart(reboot_code_buffer_phys);
 }

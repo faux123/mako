@@ -344,7 +344,8 @@ static void intelli_plug_input_event(struct input_handle *handle,
 #ifdef DEBUG_INTELLI_PLUG
 	pr_info("intelli_plug touched!\n");
 #endif
-	cancel_delayed_work_sync(&intelli_plug_work);
+
+	cancel_delayed_work(&intelli_plug_work);
 
 	sampling_time = BUSY_SAMPLING_MS;
 	busy_persist_count = BUSY_PERSISTENCE;

@@ -138,6 +138,42 @@ static void tz_wake(struct kgsl_device *device, struct kgsl_pwrscale *pwrscale)
 					device->pwrctrl.default_pwrlevel);
 }
 
+#ifdef CONFIG_MSM_KGSL_SIMPLE_GOV
+/* KGSL Simple GPU Governor */
+/* Copyright (c) 2011-2013, Paul Reioux (Faux123). All rights reserved. */
+static int lazyness = 5;
+
+static int simple_governor(struct kgsl_device *device, int idle_stat)
+{
+	int val = 0;
+	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
+
+	/* it's currently busy */
+	if (idle_stat < 6000) {
+		if (pwr->active_pwrlevel == 0)
+			val = 0; /* already maxed, so do nothing */
+		else if ((pwr->active_pwrlevel > 0) &&
+			(pwr->active_pwrlevel <= (pwr->num_pwrlevels - 1)))
+			val = -1; /* bump up to next pwrlevel */
+	/* idle case */
+	} else {
+		if ((pwr->active_pwrlevel >= 0) &&
+			(pwr->active_pwrlevel < (pwr->num_pwrlevels - 1)))
+			if (lazyness > 0) {
+				/* hold off for a while */
+				lazyness--;
+				val = 0; /* don't change anything yet */
+			} else {
+				val = 1; /* above min, lower it */
+				lazyness = 5; /* reset lazyness count */
+			}
+		else if (pwr->active_pwrlevel == (pwr->num_pwrlevels - 1))
+			val = 0; /* already @ min, so do nothing */
+	}
+	return val;
+}
+#endif
+
 static void tz_idle(struct kgsl_device *device, struct kgsl_pwrscale *pwrscale)
 {
 	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
@@ -171,16 +207,32 @@ static void tz_idle(struct kgsl_device *device, struct kgsl_pwrscale *pwrscale)
 	} else if (priv->idle_dcvs) {
 		idle = priv->bin.total_time - priv->bin.busy_time;
 		idle = (idle > 0) ? idle : 0;
+#ifdef CONFIG_MSM_KGSL_SIMPLE_GOV
+		val = simple_governor(device, idle);
+#else
 		val = __secure_tz_entry2(TZ_UPDATE_ID, idle, device->id);
+#endif
 	} else {
 		if (pwr->step_mul > 1)
+#ifdef CONFIG_MSM_KGSL_SIMPLE_GOV
+			idle = priv->bin.total_time - priv->bin.busy_time;
+			idle = (idle > 0) ? idle : 0;
+			val = simple_governor(device, idle);
+#else
 			val = __secure_tz_entry3(TZ_UPDATE_ID,
 				(pwr->active_pwrlevel + 1)/2,
 				priv->bin.total_time, priv->bin.busy_time);
+#endif
 		else
+#ifdef CONFIG_MSM_KGSL_SIMPLE_GOV
+			idle = priv->bin.total_time - priv->bin.busy_time;
+			idle = (idle > 0) ? idle : 0;
+			val = simple_governor(device, idle);
+#else
 			val = __secure_tz_entry3(TZ_UPDATE_ID,
 				pwr->active_pwrlevel,
 				priv->bin.total_time, priv->bin.busy_time);
+#endif
 	}
 
 	priv->bin.total_time = 0;

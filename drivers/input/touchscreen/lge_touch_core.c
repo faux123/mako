@@ -425,7 +425,7 @@ static int touch_ic_init(struct lge_touch_data *ts)
 		next_work = atomic_read(&ts->next_work);
 
 		if (unlikely(int_pin != 1 && next_work <= 0)) {
-			TOUCH_INFO_MSG("WARN: (init)Interrupt pin is low"
+			TOUCH_INFO_MSG("WARN: Interrupt pin is low"
 					" - next_work: %d, try_count: %d]\n",
 					next_work, ts->ic_init_err_cnt);
 			goto err_out_retry;
@@ -885,7 +885,7 @@ out:
 		next_work = atomic_read(&ts->next_work);
 
 		if (unlikely(int_pin != 1 && next_work <= 0)) {
-			TOUCH_INFO_MSG("WARN: (work)Interrupt pin is low - "
+			TOUCH_INFO_MSG("WARN: Interrupt pin is low - "
 					"next_work: %d, try_count: %d]\n",
 					next_work, ts->work_sync_err_cnt);
 			goto err_out_retry;
@@ -2168,8 +2168,7 @@ static void touch_early_suspend(struct early_suspend *h)
         }
 #ifdef CONFIG_TOUCHSCREEN_SWEEP2WAKE
         else if (s2w_switch > 0) {
-		release_all_ts_event(ts);
-		enable_irq_wake(ts->client->irq);
+                enable_irq_wake(ts->client->irq);
         }
 #endif
 }
@@ -2180,9 +2179,6 @@ static void touch_late_resume(struct early_suspend *h)
 			container_of(h, struct lge_touch_data, early_suspend);
 
 #ifdef CONFIG_TOUCHSCREEN_SWEEP2WAKE
-	int int_pin = 0;
-	int next_work = 0;
-
         scr_suspended = false;
 #endif
 
@@ -2216,30 +2212,11 @@ static void touch_late_resume(struct early_suspend *h)
 		        queue_delayed_work(touch_wq, &ts->work_init, 0);
         }
 #ifdef CONFIG_TOUCHSCREEN_SWEEP2WAKE
-        else if (s2w_switch > 0) {
+        else if (s2w_switch > 0)
                 disable_irq_wake(ts->client->irq);
-		/* Interrupt pin check after IC init - avoid Touch lockup */
-		if (ts->pdata->role->operation_mode == INTERRUPT_MODE) {
-			int_pin = gpio_get_value(ts->pdata->int_pin);
-			next_work = atomic_read(&ts->next_work);
-
-			if (unlikely(int_pin != 1 && next_work <= 0)) {
-				TOUCH_INFO_MSG("WARN: (s2w)Interrupt pin is low (Lockup detected) - next_work: %d, try_count: %d]\n",
-						next_work, ts->ic_init_err_cnt);
-				pr_warn("touch core: (s2w)disable irqs!\n");
-				disable_irq(ts->client->irq);
-				pr_warn("touch core: (s2w)release all Touch events!\n");
-				release_all_ts_event(ts);
-				pr_warn("touch core: (s2w)enable irqs!\n");
-				enable_irq(ts->client->irq);
-				pr_warn("touch core: (s2w)force IC init!\n");
-				touch_ic_init(ts);
-			}
-		}
-	}
 #endif
 }
-#endif	/* early suspend */
+#endif
 
 #if defined(CONFIG_PM)
 static int touch_suspend(struct device *device)

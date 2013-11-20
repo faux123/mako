@@ -37,6 +37,10 @@ int reg_access(unsigned int reg)
 	int ret = 1;
 
 	switch (reg) {
+		case TABLA_A_RX_HPH_L_GAIN:
+		case TABLA_A_RX_HPH_R_GAIN:
+		case TABLA_A_RX_HPH_L_STATUS:
+		case TABLA_A_RX_HPH_R_STATUS:
 		case TABLA_A_CDC_RX1_VOL_CTL_B2_CTL:
 		case TABLA_A_CDC_RX2_VOL_CTL_B2_CTL:
 		case TABLA_A_CDC_RX3_VOL_CTL_B2_CTL:

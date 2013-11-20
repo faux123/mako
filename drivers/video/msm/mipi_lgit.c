@@ -17,6 +17,7 @@
  * 02110-1301, USA.
  *
  */
+#include <linux/string.h>
 #include <linux/gpio.h>
 #include <linux/syscore_ops.h>
 
@@ -26,6 +27,12 @@
 #include "mdp4.h"
 
 static struct msm_panel_common_pdata *mipi_lgit_pdata;
+
+#ifdef CONFIG_LGIT_VIDEO_WXGA_CABC
+struct dsi_cmd_desc faux123_power_on_set_1[33];
+#else
+struct dsi_cmd_desc faux123_power_on_set_1[28];
+#endif
 
 static struct dsi_buf lgit_tx_buf;
 static struct dsi_buf lgit_rx_buf;
@@ -79,7 +86,8 @@ static int mipi_lgit_lcd_on(struct platform_device *pdev)
 
 	MIPI_OUTP(MIPI_DSI_BASE + 0x38, 0x10000000);
 	ret = mipi_dsi_cmds_tx(&lgit_tx_buf,
-			mipi_lgit_pdata->power_on_set_1,
+//			mipi_lgit_pdata->power_on_set_1,
+			faux123_power_on_set_1,
 			mipi_lgit_pdata->power_on_set_size_1);
 	MIPI_OUTP(MIPI_DSI_BASE + 0x38, 0x14000000);
 	if (ret < 0) {
@@ -221,12 +229,144 @@ struct syscore_ops panel_syscore_ops = {
 	.shutdown = mipi_lgit_lcd_shutdown,
 };
 
+/******************* begin sysfs interface *******************/
+
+static ssize_t kgamma_r_store(struct device *dev, struct device_attribute *attr,
+						const char *buf, size_t count)
+{
+	int kgamma[10];
+	int i;
+
+	sscanf(buf, "%d %d %d %d %d %d %d %d %d %d",
+		&kgamma[0], &kgamma[1], &kgamma[2], &kgamma[3],
+		&kgamma[4], &kgamma[5], &kgamma[6], &kgamma[7],
+		&kgamma[8], &kgamma[9]);
+
+	for (i=0; i<10; i++) {
+		pr_info("kgamma_r [%d] => %d \n", i, kgamma[i]);
+		faux123_power_on_set_1[5].payload[i] = kgamma[i];
+		faux123_power_on_set_1[6].payload[i] = kgamma[i];
+	}
+
+	return count;
+}
+
+static ssize_t kgamma_r_show(struct device *dev, struct device_attribute *attr,
+								char *buf)
+{
+	int kgamma[10];
+	int i;
+
+	for (i=0; i<10; i++)
+		kgamma[i] = faux123_power_on_set_1[5].payload[i];
+
+	return sprintf(buf, "%d %d %d %d %d %d %d %d %d %d", 
+		kgamma[0], kgamma[1], kgamma[2], kgamma[3],
+		kgamma[4], kgamma[5], kgamma[6], kgamma[7],
+		kgamma[8], kgamma[9]);
+}
+
+static ssize_t kgamma_g_store(struct device *dev, struct device_attribute *attr,
+						const char *buf, size_t count)
+{
+	int kgamma[10];
+	int i;
+
+	sscanf(buf, "%d %d %d %d %d %d %d %d %d %d",
+		&kgamma[0], &kgamma[1], &kgamma[2], &kgamma[3],
+		&kgamma[4], &kgamma[5], &kgamma[6], &kgamma[7],
+		&kgamma[8], &kgamma[9]);
+
+	for (i=0; i<10; i++) {
+		pr_info("kgamma_g [%d] => %d \n", i, kgamma[i]);
+		faux123_power_on_set_1[7].payload[i] = kgamma[i];
+		faux123_power_on_set_1[8].payload[i] = kgamma[i];
+	}
+
+	return count;
+}
+
+static ssize_t kgamma_g_show(struct device *dev, struct device_attribute *attr,
+								char *buf)
+{
+	int kgamma[10];
+	int i;
+
+	for (i=0; i<10; i++)
+		kgamma[i] = faux123_power_on_set_1[7].payload[i];
+
+	return sprintf(buf, "%d %d %d %d %d %d %d %d %d %d", 
+		kgamma[0], kgamma[1], kgamma[2], kgamma[3],
+		kgamma[4], kgamma[5], kgamma[6], kgamma[7],
+		kgamma[8], kgamma[9]);
+}
+
+static ssize_t kgamma_b_store(struct device *dev, struct device_attribute *attr,
+						const char *buf, size_t count)
+{
+	int kgamma[10];
+	int i;
+
+	sscanf(buf, "%d %d %d %d %d %d %d %d %d %d",
+		&kgamma[0], &kgamma[1], &kgamma[2], &kgamma[3],
+		&kgamma[4], &kgamma[5], &kgamma[6], &kgamma[7],
+		&kgamma[8], &kgamma[9]);
+
+	for (i=0; i<10; i++) {
+		pr_info("kgamma_b [%d] => %d \n", i, kgamma[i]);
+		faux123_power_on_set_1[9].payload[i] = kgamma[i];
+		faux123_power_on_set_1[10].payload[i] = kgamma[i];
+	}
+
+	return count;
+}
+
+static ssize_t kgamma_b_show(struct device *dev, struct device_attribute *attr,
+								char *buf)
+{
+	int kgamma[10];
+	int i;
+
+	for (i=0; i<10; i++)
+		kgamma[i] = faux123_power_on_set_1[9].payload[i];
+
+	return sprintf(buf, "%d %d %d %d %d %d %d %d %d %d", 
+		kgamma[0], kgamma[1], kgamma[2], kgamma[3],
+		kgamma[4], kgamma[5], kgamma[6], kgamma[7],
+		kgamma[8], kgamma[9]);
+}
+
+static ssize_t kgamma_ctrl_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	return count;
+}
+
+static ssize_t kgamma_ctrl_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	return 0;
+}
+
+static DEVICE_ATTR(kgamma_r, 0644, kgamma_r_show, kgamma_r_store);
+static DEVICE_ATTR(kgamma_g, 0644, kgamma_g_show, kgamma_g_store);
+static DEVICE_ATTR(kgamma_b, 0644, kgamma_b_show, kgamma_b_store);
+static DEVICE_ATTR(kgamma_ctrl, 0644, kgamma_ctrl_show, kgamma_ctrl_store);
+
+/******************* end sysfs interface *******************/
+
 static int mipi_lgit_lcd_probe(struct platform_device *pdev)
 {
+	int rc;
+
 	if (pdev->id == 0) {
 		mipi_lgit_pdata = pdev->dev.platform_data;
 		return 0;
 	}
+
+	// make a copy of platform data
+	memcpy((void*)faux123_power_on_set_1, (void*)mipi_lgit_pdata->power_on_set_1, 
+		sizeof(faux123_power_on_set_1));
 
 	pr_info("%s start\n", __func__);
 
@@ -234,6 +374,18 @@ static int mipi_lgit_lcd_probe(struct platform_device *pdev)
 	msm_fb_add_device(pdev);
 
 	register_syscore_ops(&panel_syscore_ops);
+	rc = device_create_file(&pdev->dev, &dev_attr_kgamma_r);
+	if(rc !=0)
+		return -1;
+	rc = device_create_file(&pdev->dev, &dev_attr_kgamma_g);
+	if(rc !=0)
+		return -1;
+	rc = device_create_file(&pdev->dev, &dev_attr_kgamma_b);
+	if(rc !=0)
+		return -1;
+	rc = device_create_file(&pdev->dev, &dev_attr_kgamma_ctrl);
+	if(rc !=0)
+		return -1;
 
 	return 0;
 }

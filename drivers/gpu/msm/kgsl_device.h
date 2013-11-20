@@ -16,6 +16,7 @@
 #include <linux/slab.h>
 #include <linux/idr.h>
 #include <linux/pm_qos.h>
+#include <linux/earlysuspend.h>
 #include <linux/sched.h>
 
 #include "kgsl.h"
@@ -48,6 +49,7 @@
 #define KGSL_STATE_SLEEP	0x00000008
 #define KGSL_STATE_SUSPEND	0x00000010
 #define KGSL_STATE_HUNG		0x00000020
+#define KGSL_STATE_DUMP_AND_FT	0x00000040
 #define KGSL_STATE_SLUMBER	0x00000080
 
 #define KGSL_GRAPHICS_MEMORY_LOW_WATERMARK  0x1000000
@@ -131,9 +133,10 @@ struct kgsl_functable {
 		enum kgsl_property_type type, void *value,
 		unsigned int sizebytes);
 	int (*postmortem_dump) (struct kgsl_device *device, int manual);
+	int (*next_event)(struct kgsl_device *device,
+		struct kgsl_event *event);
 	void (*drawctxt_sched)(struct kgsl_device *device,
 		struct kgsl_context *context);
-	void (*resume)(struct kgsl_device *device);
 };
 
 /* MH register values */
@@ -166,7 +169,6 @@ struct kgsl_event {
  * @priv: Internal flags
  * @fault_policy: Internal policy describing how to handle this command in case
  * of a fault
- * @fault_recovery: recovery actions actually tried for this batch
  * @ibcount: Number of IBs in the command list
  * @ibdesc: Pointer to the list of IBs
  * @expires: Point in time when the cmdbatch is considered to be hung
@@ -174,7 +176,6 @@ struct kgsl_event {
  * context should be invalidated
  * @refcount: kref structure to maintain the reference count
  * @synclist: List of context/timestamp tuples to wait for before issuing
- * @priority: Priority of the cmdbatch (inherited from the context)
  *
  * This struture defines an atomic batch of command buffers issued from
  * userspace.
@@ -185,30 +186,20 @@ struct kgsl_cmdbatch {
 	spinlock_t lock;
 	uint32_t timestamp;
 	uint32_t flags;
-	unsigned long priv;
-	unsigned long fault_policy;
-	unsigned long fault_recovery;
+	uint32_t priv;
+	uint32_t fault_policy;
 	uint32_t ibcount;
 	struct kgsl_ibdesc *ibdesc;
 	unsigned long expires;
 	int invalid;
 	struct kref refcount;
 	struct list_head synclist;
-	int priority;
 };
 
-/**
- * enum kgsl_cmdbatch_priv - Internal cmdbatch flags
- * @CMDBATCH_FLAG_SKIP - skip the entire command batch
- * @CMDBATCH_FLAG_FORCE_PREAMBLE - Force the preamble on for the cmdbatch
- * @CMDBATCH_FLAG_WFI - Force wait-for-idle for the submission
- */
+/* Internal cmdbatch flags */
 
-enum kgsl_cmdbatch_priv {
-	CMDBATCH_FLAG_SKIP = 0,
-	CMDBATCH_FLAG_FORCE_PREAMBLE,
-	CMDBATCH_FLAG_WFI,
-};
+#define CMDBATCH_FLAG_SKIP BIT(0)
+#define CMDBATCH_FLAG_FORCE_PREAMBLE BIT(1)
 
 struct kgsl_device {
 	struct device *dev;
@@ -217,27 +208,11 @@ struct kgsl_device {
 	unsigned int ver_minor;
 	uint32_t flags;
 	enum kgsl_deviceid id;
-
-	/* Starting physical address for GPU registers */
 	unsigned long reg_phys;
-
-	/* Starting Kernel virtual address for GPU registers */
 	void *reg_virt;
-
-	/* Total memory size for all GPU registers */
 	unsigned int reg_len;
-
-	/* Kernel virtual address for GPU shader memory */
-	void *shader_mem_virt;
-
-	/* Starting physical address for GPU shader memory */
-	unsigned long shader_mem_phys;
-
-	/* GPU shader memory size */
-	unsigned int shader_mem_len;
 	struct kgsl_memdesc memstore;
 	const char *iomemname;
-	const char *shadermemname;
 
 	struct kgsl_mh mh;
 	struct kgsl_mmu mmu;
@@ -253,20 +228,20 @@ struct kgsl_device {
 	uint32_t requested_state;
 
 	atomic_t active_cnt;
+	struct completion suspend_gate;
 
 	wait_queue_head_t wait_queue;
-	wait_queue_head_t active_cnt_wq;
 	struct workqueue_struct *work_queue;
 	struct device *parentdev;
 	struct dentry *d_debugfs;
 	struct idr context_idr;
+	struct early_suspend display_off;
 	rwlock_t context_lock;
 
 	void *snapshot;		/* Pointer to the snapshot memory region */
 	int snapshot_maxsize;   /* Max size of the snapshot region */
 	int snapshot_size;      /* Current size of the snapshot region */
 	u32 snapshot_timestamp;	/* Timestamp of the last valid snapshot */
-	u32 snapshot_faultcount;	/* Total number of faults since boot */
 	int snapshot_frozen;	/* 1 if the snapshot output is frozen until
 				   it gets read by the user.  This avoids
 				   losing the output on multiple hangs  */
@@ -277,14 +252,6 @@ struct kgsl_device {
 	 * dumped
 	 */
 	struct list_head snapshot_obj_list;
-	/* List of IB's to be dumped */
-	struct list_head snapshot_cp_list;
-	/* Work item that saves snapshot's frozen object data */
-	struct work_struct snapshot_obj_ws;
-	/* snapshot memory holding the hanging IB's objects in snapshot */
-	void *snapshot_cur_ib_objs;
-	/* Size of snapshot_cur_ib_objs */
-	int snapshot_cur_ib_objs_size;
 
 	/* Logging levels */
 	int cmd_log;
@@ -295,6 +262,7 @@ struct kgsl_device {
 	int pm_dump_enable;
 	struct kgsl_pwrscale pwrscale;
 	struct kobject pwrscale_kobj;
+	struct pm_qos_request pm_qos_req_dma;
 	struct work_struct ts_expired_ws;
 	struct list_head events;
 	struct list_head events_pending_list;
@@ -306,7 +274,6 @@ struct kgsl_device {
 	int pm_ib_enabled;
 
 	int reset_counter; /* Track how many GPU core resets have occured */
-	int cff_dump_enable;
 };
 
 void kgsl_process_events(struct work_struct *work);
@@ -314,18 +281,15 @@ void kgsl_check_fences(struct work_struct *work);
 
 #define KGSL_DEVICE_COMMON_INIT(_dev) \
 	.hwaccess_gate = COMPLETION_INITIALIZER((_dev).hwaccess_gate),\
+	.suspend_gate = COMPLETION_INITIALIZER((_dev).suspend_gate),\
 	.idle_check_ws = __WORK_INITIALIZER((_dev).idle_check_ws,\
 			kgsl_idle_check),\
 	.ts_expired_ws  = __WORK_INITIALIZER((_dev).ts_expired_ws,\
 			kgsl_process_events),\
-	.snapshot_obj_ws = \
-		__WORK_INITIALIZER((_dev).snapshot_obj_ws,\
-		kgsl_snapshot_save_frozen_objs),\
 	.context_idr = IDR_INIT((_dev).context_idr),\
 	.events = LIST_HEAD_INIT((_dev).events),\
 	.events_pending_list = LIST_HEAD_INIT((_dev).events_pending_list), \
 	.wait_queue = __WAIT_QUEUE_HEAD_INITIALIZER((_dev).wait_queue),\
-	.active_cnt_wq = __WAIT_QUEUE_HEAD_INITIALIZER((_dev).active_cnt_wq),\
 	.mutex = __MUTEX_INITIALIZER((_dev).mutex),\
 	.state = KGSL_STATE_INIT,\
 	.ver_major = DRIVER_VERSION_MAJOR,\
@@ -338,7 +302,6 @@ void kgsl_check_fences(struct work_struct *work);
 /* the context has caused a pagefault */
 #define KGSL_CONTEXT_PAGEFAULT 1
 
-struct kgsl_process_private;
 /**
  * struct kgsl_context - Master structure for a KGSL context object
  * @refcount: kref object for reference counting the context
@@ -362,10 +325,9 @@ struct kgsl_context {
 	struct kref refcount;
 	uint32_t id;
 	pid_t pid;
-	struct kgsl_device_private *dev_priv;
-	struct kgsl_process_private *proc_priv;
 	unsigned long priv;
 	struct kgsl_device *device;
+	struct kgsl_pagetable *pagetable;
 	unsigned int reset_status;
 	bool wait_on_invalid_ts;
 	struct sync_timeline *timeline;
@@ -514,7 +476,6 @@ const char *kgsl_pwrstate_to_str(unsigned int state);
 int kgsl_device_snapshot_init(struct kgsl_device *device);
 int kgsl_device_snapshot(struct kgsl_device *device, int hang);
 void kgsl_device_snapshot_close(struct kgsl_device *device);
-void kgsl_snapshot_save_frozen_objs(struct work_struct *work);
 
 static inline struct kgsl_device_platform_data *
 kgsl_device_get_drvdata(struct kgsl_device *dev)
@@ -529,7 +490,6 @@ void kgsl_context_destroy(struct kref *kref);
 
 int kgsl_context_init(struct kgsl_device_private *, struct kgsl_context
 		*context);
-int kgsl_context_detach(struct kgsl_context *context);
 
 /**
  * kgsl_context_put() - Release context reference count
@@ -551,7 +511,7 @@ kgsl_context_put(struct kgsl_context *context)
  *
  * Check if a context has been destroyed by userspace and is only waiting
  * for reference counts to go away. This check is used to weed out
- * contexts that shouldn't use the gpu so NULL is considered detached.
+ * contexts that shouldn't use the gpu, so NULL is considered detached.
  */
 static inline bool kgsl_context_detached(struct kgsl_context *context)
 {
@@ -574,7 +534,6 @@ static inline bool kgsl_context_detached(struct kgsl_context *context)
 static inline struct kgsl_context *kgsl_context_get(struct kgsl_device *device,
 		uint32_t id)
 {
-	int result = 0;
 	struct kgsl_context *context = NULL;
 
 	read_lock(&device->context_lock);
@@ -585,12 +544,10 @@ static inline struct kgsl_context *kgsl_context_get(struct kgsl_device *device,
 	if (kgsl_context_detached(context))
 		context = NULL;
 	else
-		result = kref_get_unless_zero(&context->refcount);
+		kref_get(&context->refcount);
 
 	read_unlock(&device->context_lock);
 
-	if (!result)
-		return NULL;
 	return context;
 }
 
@@ -602,22 +559,10 @@ static inline struct kgsl_context *kgsl_context_get(struct kgsl_device *device,
 * lightweight way to just increase the refcount on a known context rather than
 * walking through kgsl_context_get and searching the iterator
 */
-static inline int _kgsl_context_get(struct kgsl_context *context)
+static inline void _kgsl_context_get(struct kgsl_context *context)
 {
-	int ret = 0;
-
-	if (context) {
-		ret = kref_get_unless_zero(&context->refcount);
-		/*
-		 * We shouldn't realistically fail kref_get_unless_zero unless
-		 * we did something really dumb so make the failure both public
-		 * and painful
-		 */
-
-		WARN_ON(!ret);
-	}
-
-	return ret;
+	if (context)
+		kref_get(&context->refcount);
 }
 
 /**
@@ -699,35 +644,5 @@ static inline int kgsl_cmdbatch_sync_pending(struct kgsl_cmdbatch *cmdbatch)
 {
 	return list_empty(&cmdbatch->synclist) ? 0 : 1;
 }
-
-#if defined(CONFIG_GPU_TRACEPOINTS)
-
-#include <trace/events/gpu.h>
-
-static inline void kgsl_trace_gpu_job_enqueue(unsigned int ctxt_id,
-		unsigned int timestamp, const char *type)
-{
-	trace_gpu_job_enqueue(ctxt_id, timestamp, type);
-}
-
-static inline void kgsl_trace_gpu_sched_switch(const char *name,
-	u64 time, u32 ctxt_id, s32 prio, u32 timestamp)
-{
-	trace_gpu_sched_switch(name, time, ctxt_id, prio, timestamp);
-}
-
-#else
-
-static inline void kgsl_trace_gpu_job_enqueue(unsigned int ctxt_id,
-		unsigned int timestamp, const char *type)
-{
-}
-
-static inline void kgsl_trace_gpu_sched_switch(const char *name,
-	u64 time, u32 ctxt_id, s32 prio, u32 timestamp)
-{
-}
-
-#endif
 
 #endif  /* __KGSL_DEVICE_H */

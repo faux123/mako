@@ -120,7 +120,6 @@ EXPORT_SYMBOL_GPL(iommu_present);
  * iommu_set_fault_handler() - set a fault handler for an iommu domain
  * @domain: iommu domain
  * @handler: fault handler
- * @token: user data, will be passed back to the fault handler
  *
  * This function should be used by IOMMU users which want to be notified
  * whenever an IOMMU fault happens.
@@ -129,13 +128,11 @@ EXPORT_SYMBOL_GPL(iommu_present);
  * error code otherwise.
  */
 void iommu_set_fault_handler(struct iommu_domain *domain,
-					iommu_fault_handler_t handler,
-					void *token)
+					iommu_fault_handler_t handler)
 {
 	BUG_ON(!domain);
 
 	domain->handler = handler;
-	domain->handler_token = token;
 }
 EXPORT_SYMBOL_GPL(iommu_set_fault_handler);
 

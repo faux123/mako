@@ -1,4 +1,4 @@
-/* Copyright (c) 2002,2008-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2002,2008-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -19,6 +19,7 @@
 #include "kgsl_sharedmem.h"
 
 /*default log levels is error for everything*/
+#define KGSL_LOG_LEVEL_DEFAULT 3
 #define KGSL_LOG_LEVEL_MAX     7
 
 struct dentry *kgsl_debugfs_dir;
@@ -178,6 +179,12 @@ void kgsl_device_debugfs_init(struct kgsl_device *device)
 	if (!device->d_debugfs || IS_ERR(device->d_debugfs))
 		return;
 
+	device->cmd_log = KGSL_LOG_LEVEL_DEFAULT;
+	device->ctxt_log = KGSL_LOG_LEVEL_DEFAULT;
+	device->drv_log = KGSL_LOG_LEVEL_DEFAULT;
+	device->mem_log = KGSL_LOG_LEVEL_DEFAULT;
+	device->pwr_log = KGSL_LOG_LEVEL_DEFAULT;
+
 	debugfs_create_file("log_level_cmd", 0644, device->d_debugfs, device,
 			    &cmd_log_fops);
 	debugfs_create_file("log_level_ctxt", 0644, device->d_debugfs, device,
@@ -204,6 +211,7 @@ void kgsl_device_debugfs_init(struct kgsl_device *device)
 			    &pm_regs_enabled_fops);
 	debugfs_create_file("ib_enabled", 0644, pm_d_debugfs, device,
 				    &pm_ib_enabled_fops);
+	device->pm_dump_enable = 0;
 	debugfs_create_file("enable", 0644, pm_d_debugfs, device,
 				    &pm_enabled_fops);
 
@@ -260,8 +268,8 @@ static void print_mem_entry(struct seq_file *s, struct kgsl_mem_entry *entry)
 
 	kgsl_get_memory_usage(usage, sizeof(usage), m->flags);
 
-	seq_printf(s, "%08x %08lx %8d %5d %5s %10s %16s %5d\n",
-			m->gpuaddr, m->useraddr, m->size, entry->id, flags,
+	seq_printf(s, "%08x %8d %5d %5s %10s %16s %5d\n",
+			m->gpuaddr, m->size, entry->id, flags,
 			memtype_str(entry->memtype), usage, m->sglen);
 }
 
@@ -272,9 +280,8 @@ static int process_mem_print(struct seq_file *s, void *unused)
 	struct kgsl_process_private *private = s->private;
 	int next = 0;
 
-	seq_printf(s, "%8s %8s %8s %5s %5s %10s %16s %5s\n",
-		   "gpuaddr", "useraddr", "size", "id", "flags", "type",
-		   "usage", "sglen");
+	seq_printf(s, "%8s %8s %5s %5s %10s %16s %5s\n",
+		   "gpuaddr", "size", "id", "flags", "type", "usage", "sglen");
 
 	/* print all entries with a GPU address */
 	spin_lock(&private->mem_lock);
@@ -284,17 +291,20 @@ static int process_mem_print(struct seq_file *s, void *unused)
 		print_mem_entry(s, entry);
 	}
 
+	spin_unlock(&private->mem_lock);
 
 	/* now print all the unbound entries */
 	while (1) {
+		rcu_read_lock();
 		entry = idr_get_next(&private->mem_idr, &next);
+		rcu_read_unlock();
+
 		if (entry == NULL)
 			break;
 		if (entry->memdesc.gpuaddr == 0)
 			print_mem_entry(s, entry);
 		next++;
 	}
-	spin_unlock(&private->mem_lock);
 
 	return 0;
 }
@@ -311,59 +321,16 @@ static const struct file_operations process_mem_fops = {
 	.release = single_release,
 };
 
-
-/**
- * kgsl_process_init_debugfs() - Initialize debugfs for a process
- * @private: Pointer to process private structure created for the process
- *
- * @returns: 0 on success, error code otherwise
- *
- * kgsl_process_init_debugfs() is called at the time of creating the
- * process struct when a process opens kgsl device for the first time.
- * The function creates the debugfs files for the process. If debugfs is
- * disabled in the kernel, we ignore that error and return as successful.
- */
-int
+void
 kgsl_process_init_debugfs(struct kgsl_process_private *private)
 {
 	unsigned char name[16];
-	int ret = 0;
-	struct dentry *dentry;
 
 	snprintf(name, sizeof(name), "%d", private->pid);
 
 	private->debug_root = debugfs_create_dir(name, proc_d_debugfs);
-
-	if (!private->debug_root)
-		return -EINVAL;
-
-	private->debug_root->d_inode->i_uid = proc_d_debugfs->d_inode->i_uid;
-	private->debug_root->d_inode->i_gid = proc_d_debugfs->d_inode->i_gid;
-
-	/*
-	 * debugfs_create_dir() and debugfs_create_file() both
-	 * return -ENODEV if debugfs is disabled in the kernel.
-	 * We make a distinction between these two functions
-	 * failing and debugfs being disabled in the kernel.
-	 * In the first case, we abort process private struct
-	 * creation, in the second we continue without any changes.
-	 * So if debugfs is disabled in kernel, return as
-	 * success.
-	 */
-	dentry = debugfs_create_file("mem", 0400, private->debug_root, private,
+	debugfs_create_file("mem", 0400, private->debug_root, private,
 			    &process_mem_fops);
-
-	if (IS_ERR(dentry)) {
-		ret = PTR_ERR(dentry);
-
-		if (ret == -ENODEV)
-			ret = 0;
-	} else if (dentry) {
-		dentry->d_inode->i_uid = proc_d_debugfs->d_inode->i_uid;
-		dentry->d_inode->i_gid = proc_d_debugfs->d_inode->i_gid;
-	}
-
-	return ret;
 }
 
 void kgsl_core_debugfs_init(void)

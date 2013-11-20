@@ -19,11 +19,26 @@
 
 #include "kgsl.h"
 #include "adreno.h"
-#include "kgsl_cffdump.h"
 
 #include "a2xx_reg.h"
 
 unsigned int kgsl_cff_dump_enable;
+
+static int kgsl_cff_dump_enable_set(void *data, u64 val)
+{
+#ifdef CONFIG_MSM_KGSL_CFF_DUMP
+	kgsl_cff_dump_enable = (val != 0);
+	return 0;
+#else
+	return -EINVAL;
+#endif
+}
+
+static int kgsl_cff_dump_enable_get(void *data, u64 *val)
+{
+	*val = kgsl_cff_dump_enable;
+	return 0;
+}
 
 DEFINE_SIMPLE_ATTRIBUTE(kgsl_cff_dump_enable_fops, kgsl_cff_dump_enable_get,
 			kgsl_cff_dump_enable_set, "%llu\n");
@@ -91,6 +106,6 @@ void adreno_debugfs_init(struct kgsl_device *device)
 	 debugfs_create_u32("ft_pagefault_policy", 0644, device->d_debugfs,
 			&adreno_dev->ft_pf_policy);
 
-	debugfs_create_file("active_cnt", 0444, device->d_debugfs, device,
+	debugfs_create_file("active_cnt", 0644, device->d_debugfs, device,
 			    &_active_count_fops);
 }

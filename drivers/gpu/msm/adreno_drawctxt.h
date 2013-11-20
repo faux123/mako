@@ -107,7 +107,6 @@ struct gmem_shadow_t {
  * @id: Unique integer ID of the context
  * @timestamp: Last issued context-specific timestamp
  * @internal_timestamp: Global timestamp of the last issued command
- *			NOTE: guarded by device->mutex, not drawctxt->mutex!
  * @state: Current state of the context
  * @flags: Bitfield controlling behavior of the context
  * @type: Context type (GL, CL, RS)

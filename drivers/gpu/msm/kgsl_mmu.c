@@ -23,7 +23,6 @@
 
 #include "kgsl.h"
 #include "kgsl_mmu.h"
-#include "kgsl_gpummu.h"
 #include "kgsl_device.h"
 #include "kgsl_sharedmem.h"
 #include "adreno.h"
@@ -69,10 +68,8 @@ static int kgsl_setup_pt(struct kgsl_pagetable *pt)
 	device = kgsl_driver.devp[KGSL_DEVICE_3D0];
 	if (device->mmu.mmu_ops->mmu_setup_pt != NULL) {
 		status = device->mmu.mmu_ops->mmu_setup_pt(&device->mmu, pt);
-		if (status) {
-			i = KGSL_DEVICE_MAX - 1;
+		if (status)
 			goto error_pt;
-		}
 	}
 	return status;
 error_pt:
@@ -104,7 +101,7 @@ static void kgsl_destroy_pagetable(struct kref *kref)
 	if (pagetable->pool)
 		gen_pool_destroy(pagetable->pool);
 
-	pagetable->pt_ops->mmu_destroy_pagetable(pagetable);
+	pagetable->pt_ops->mmu_destroy_pagetable(pagetable->priv);
 
 	kfree(pagetable);
 }
@@ -123,12 +120,10 @@ kgsl_get_pagetable(unsigned long name)
 
 	spin_lock_irqsave(&kgsl_driver.ptlock, flags);
 	list_for_each_entry(pt, &kgsl_driver.pagetable_list, list) {
-		if (kref_get_unless_zero(&pt->refcount)) {
-			if (pt->name == name) {
-				ret = pt;
-				break;
-			}
-			kref_put(&pt->refcount, kgsl_destroy_pagetable);
+		if (pt->name == name) {
+			ret = pt;
+			kref_get(&ret->refcount);
+			break;
 		}
 	}
 
@@ -196,7 +191,7 @@ sysfs_show_va_range(struct kobject *kobj,
 
 	if (pt) {
 		ret += snprintf(buf, PAGE_SIZE, "0x%x\n",
-			kgsl_mmu_get_ptsize(pt->mmu));
+			kgsl_mmu_get_ptsize());
 	}
 
 	kgsl_put_pagetable(pt);
@@ -316,7 +311,7 @@ err:
 }
 
 int
-kgsl_mmu_get_ptname_from_ptbase(struct kgsl_mmu *mmu, phys_addr_t pt_base)
+kgsl_mmu_get_ptname_from_ptbase(struct kgsl_mmu *mmu, unsigned int pt_base)
 {
 	struct kgsl_pagetable *pt;
 	int ptid = -1;
@@ -325,13 +320,9 @@ kgsl_mmu_get_ptname_from_ptbase(struct kgsl_mmu *mmu, phys_addr_t pt_base)
 		return KGSL_MMU_GLOBAL_PT;
 	spin_lock(&kgsl_driver.ptlock);
 	list_for_each_entry(pt, &kgsl_driver.pagetable_list, list) {
-		if (kref_get_unless_zero(&pt->refcount)) {
-			if (mmu->mmu_ops->mmu_pt_equal(mmu, pt, pt_base)) {
-				ptid = (int) pt->name;
-				kref_put(&pt->refcount, kgsl_destroy_pagetable);
-				break;
-			}
-			kref_put(&pt->refcount, kgsl_destroy_pagetable);
+		if (mmu->mmu_ops->mmu_pt_equal(mmu, pt, pt_base)) {
+			ptid = (int) pt->name;
+			break;
 		}
 	}
 	spin_unlock(&kgsl_driver.ptlock);
@@ -341,7 +332,7 @@ kgsl_mmu_get_ptname_from_ptbase(struct kgsl_mmu *mmu, phys_addr_t pt_base)
 EXPORT_SYMBOL(kgsl_mmu_get_ptname_from_ptbase);
 
 unsigned int
-kgsl_mmu_log_fault_addr(struct kgsl_mmu *mmu, phys_addr_t pt_base,
+kgsl_mmu_log_fault_addr(struct kgsl_mmu *mmu, unsigned int pt_base,
 					unsigned int addr)
 {
 	struct kgsl_pagetable *pt;
@@ -351,23 +342,16 @@ kgsl_mmu_log_fault_addr(struct kgsl_mmu *mmu, phys_addr_t pt_base,
 		return KGSL_MMU_GLOBAL_PT;
 	spin_lock(&kgsl_driver.ptlock);
 	list_for_each_entry(pt, &kgsl_driver.pagetable_list, list) {
-		if (kref_get_unless_zero(&pt->refcount)) {
-			if (mmu->mmu_ops->mmu_pt_equal(mmu, pt, pt_base)) {
-				if ((addr & ~(PAGE_SIZE-1)) == pt->fault_addr) {
-					ret = 1;
-					kref_put(&pt->refcount,
-						kgsl_destroy_pagetable);
-					break;
-				} else {
-					pt->fault_addr =
-						(addr & ~(PAGE_SIZE-1));
-					ret = 0;
-					kref_put(&pt->refcount,
-						kgsl_destroy_pagetable);
-					break;
-				}
+		if (mmu->mmu_ops->mmu_pt_equal(mmu, pt, pt_base)) {
+			if ((addr & (PAGE_SIZE-1)) == pt->fault_addr) {
+				ret = 1;
+				break;
+			} else {
+				pt->fault_addr = (addr & (PAGE_SIZE-1));
+				ret = 0;
+				break;
 			}
-			kref_put(&pt->refcount, kgsl_destroy_pagetable);
+
 		}
 	}
 	spin_unlock(&kgsl_driver.ptlock);
@@ -385,7 +369,7 @@ int kgsl_mmu_init(struct kgsl_device *device)
 	status = kgsl_allocate_contiguous(&mmu->setstate_memory, PAGE_SIZE);
 	if (status)
 		return status;
-	kgsl_sharedmem_set(device, &mmu->setstate_memory, 0, 0,
+	kgsl_sharedmem_set(&mmu->setstate_memory, 0, 0,
 				mmu->setstate_memory.size);
 
 	if (KGSL_MMU_TYPE_NONE == kgsl_mmu_type) {
@@ -423,8 +407,7 @@ EXPORT_SYMBOL(kgsl_mmu_start);
 
 static void mh_axi_error(struct kgsl_device *device, const char* type)
 {
-	unsigned int reg, gpu_err, phys_err;
-	phys_addr_t pt_base;
+	unsigned int reg, gpu_err, phys_err, pt_base;
 
 	kgsl_regread(device, MH_AXI_ERROR, &reg);
 	pt_base = kgsl_mmu_get_current_ptbase(&device->mmu);
@@ -437,8 +420,8 @@ static void mh_axi_error(struct kgsl_device *device, const char* type)
 	kgsl_regwrite(device, MH_DEBUG_CTRL, 45);
 	kgsl_regread(device, MH_DEBUG_DATA, &phys_err);
 	KGSL_MEM_CRIT(device,
-			"axi %s error: %08x pt %pa gpu %08x phys %08x\n",
-			type, reg, &pt_base, gpu_err, phys_err);
+			"axi %s error: %08x pt %08x gpu %08x phys %08x\n",
+			type, reg, pt_base, gpu_err, phys_err);
 }
 
 void kgsl_mh_intrcallback(struct kgsl_device *device)
@@ -459,8 +442,7 @@ void kgsl_mh_intrcallback(struct kgsl_device *device)
 }
 EXPORT_SYMBOL(kgsl_mh_intrcallback);
 
-static struct kgsl_pagetable *
-kgsl_mmu_createpagetableobject(struct kgsl_mmu *mmu,
+static struct kgsl_pagetable *kgsl_mmu_createpagetableobject(
 				unsigned int name)
 {
 	int status = 0;
@@ -479,8 +461,8 @@ kgsl_mmu_createpagetableobject(struct kgsl_mmu *mmu,
 
 	spin_lock_init(&pagetable->lock);
 
-	ptsize = kgsl_mmu_get_ptsize(mmu);
-	pagetable->mmu = mmu;
+	ptsize = kgsl_mmu_get_ptsize();
+
 	pagetable->name = name;
 	pagetable->max_entries = KGSL_PAGETABLE_ENTRIES(ptsize);
 	pagetable->fault_addr = 0xFFFFFFFF;
@@ -513,7 +495,7 @@ kgsl_mmu_createpagetableobject(struct kgsl_mmu *mmu,
 		goto err_kgsl_pool;
 	}
 
-	if (gen_pool_add(pagetable->pool, kgsl_mmu_get_base_addr(mmu),
+	if (gen_pool_add(pagetable->pool, kgsl_mmu_get_base_addr(),
 				ptsize, -1)) {
 		KGSL_CORE_ERR("gen_pool_add failed\n");
 		goto err_pool;
@@ -542,7 +524,7 @@ kgsl_mmu_createpagetableobject(struct kgsl_mmu *mmu,
 	return pagetable;
 
 err_mmu_create:
-	pagetable->pt_ops->mmu_destroy_pagetable(pagetable);
+	pagetable->pt_ops->mmu_destroy_pagetable(pagetable->priv);
 err_pool:
 	gen_pool_destroy(pagetable->pool);
 err_kgsl_pool:
@@ -554,21 +536,20 @@ err_alloc:
 	return NULL;
 }
 
-struct kgsl_pagetable *kgsl_mmu_getpagetable(struct kgsl_mmu *mmu,
-						unsigned long name)
+struct kgsl_pagetable *kgsl_mmu_getpagetable(unsigned long name)
 {
 	struct kgsl_pagetable *pt;
 
 	if (KGSL_MMU_TYPE_NONE == kgsl_mmu_type)
 		return (void *)(-1);
 
-	if (!kgsl_mmu_is_perprocess(mmu))
+	if (!kgsl_mmu_is_perprocess())
 		name = KGSL_MMU_GLOBAL_PT;
 
 	pt = kgsl_get_pagetable(name);
 
 	if (pt == NULL)
-		pt = kgsl_mmu_createpagetableobject(mmu, name);
+		pt = kgsl_mmu_createpagetableobject(name);
 
 	return pt;
 }
@@ -627,20 +608,15 @@ void kgsl_mh_start(struct kgsl_device *device)
 }
 EXPORT_SYMBOL(kgsl_mh_start);
 
-/**
- * kgsl_mmu_get_gpuaddr - Assign a memdesc with a gpuadddr from the gen pool
- * @pagetable - pagetable whose pool is to be used
- * @memdesc - memdesc to which gpuaddr is assigned
- *
- * returns - 0 on success else error code
- */
 int
-kgsl_mmu_get_gpuaddr(struct kgsl_pagetable *pagetable,
-			struct kgsl_memdesc *memdesc)
+kgsl_mmu_map(struct kgsl_pagetable *pagetable,
+				struct kgsl_memdesc *memdesc)
 {
+	int ret;
 	struct gen_pool *pool = NULL;
 	int size;
 	int page_align = ilog2(PAGE_SIZE);
+	unsigned int protflags = kgsl_memdesc_protflags(memdesc);
 
 	if (kgsl_mmu_type == KGSL_MMU_TYPE_NONE) {
 		if (memdesc->sglen == 1) {
@@ -712,38 +688,16 @@ kgsl_mmu_get_gpuaddr(struct kgsl_pagetable *pagetable,
 			return -ENOMEM;
 		}
 	}
-	return 0;
-}
-EXPORT_SYMBOL(kgsl_mmu_get_gpuaddr);
-
-int
-kgsl_mmu_map(struct kgsl_pagetable *pagetable,
-				struct kgsl_memdesc *memdesc)
-{
-	int ret = 0;
-	int size;
-	unsigned int protflags = kgsl_memdesc_protflags(memdesc);
-
-	if (!memdesc->gpuaddr)
-		return -EINVAL;
-	/* Only global mappings should be mapped multiple times */
-	if (!kgsl_memdesc_is_global(memdesc) &&
-		(KGSL_MEMDESC_MAPPED & memdesc->priv))
-		return -EINVAL;
-	/* Add space for the guard page when allocating the mmu VA. */
-	size = memdesc->size;
-	if (kgsl_memdesc_has_guard_page(memdesc))
-		size += PAGE_SIZE;
 
 	if (KGSL_MMU_TYPE_IOMMU != kgsl_mmu_get_mmutype())
 		spin_lock(&pagetable->lock);
-	ret = pagetable->pt_ops->mmu_map(pagetable, memdesc, protflags,
+	ret = pagetable->pt_ops->mmu_map(pagetable->priv, memdesc, protflags,
 						&pagetable->tlb_flags);
 	if (KGSL_MMU_TYPE_IOMMU == kgsl_mmu_get_mmutype())
 		spin_lock(&pagetable->lock);
 
 	if (ret)
-		goto done;
+		goto err_free_gpuaddr;
 
 	/* Keep track of the statistics for the sysfs files */
 
@@ -754,76 +708,34 @@ kgsl_mmu_map(struct kgsl_pagetable *pagetable,
 		       pagetable->stats.max_mapped);
 
 	spin_unlock(&pagetable->lock);
-	memdesc->priv |= KGSL_MEMDESC_MAPPED;
 
 	return 0;
 
-done:
+err_free_gpuaddr:
 	spin_unlock(&pagetable->lock);
+	if (pool)
+		gen_pool_free(pool, memdesc->gpuaddr, size);
+	memdesc->gpuaddr = 0;
 	return ret;
 }
 EXPORT_SYMBOL(kgsl_mmu_map);
-
-/**
- * kgsl_mmu_put_gpuaddr - Free a gpuaddress from memory pool
- * @pagetable - pagetable whose pool memory is freed from
- * @memdesc - memdesc whose gpuaddress is freed
- *
- * returns - 0 on success else error code
- */
-int
-kgsl_mmu_put_gpuaddr(struct kgsl_pagetable *pagetable,
-			struct kgsl_memdesc *memdesc)
-{
-	struct gen_pool *pool;
-	int size;
-
-	if (memdesc->size == 0 || memdesc->gpuaddr == 0)
-		return 0;
-
-	if (kgsl_mmu_type == KGSL_MMU_TYPE_NONE)
-		goto done;
-
-	/* Add space for the guard page when freeing the mmu VA. */
-	size = memdesc->size;
-	if (kgsl_memdesc_has_guard_page(memdesc))
-		size += PAGE_SIZE;
-
-	pool = pagetable->pool;
-
-	if (KGSL_MMU_TYPE_IOMMU == kgsl_mmu_get_mmutype()) {
-		if (kgsl_memdesc_is_global(memdesc))
-			pool = pagetable->kgsl_pool;
-		else if (kgsl_memdesc_use_cpu_map(memdesc))
-			pool = NULL;
-	}
-	if (pool)
-		gen_pool_free(pool, memdesc->gpuaddr, size);
-	/*
-	 * Don't clear the gpuaddr on global mappings because they
-	 * may be in use by other pagetables
-	 */
-done:
-	if (!kgsl_memdesc_is_global(memdesc))
-		memdesc->gpuaddr = 0;
-	return 0;
-}
-EXPORT_SYMBOL(kgsl_mmu_put_gpuaddr);
 
 int
 kgsl_mmu_unmap(struct kgsl_pagetable *pagetable,
 		struct kgsl_memdesc *memdesc)
 {
+	struct gen_pool *pool;
 	int size;
 	unsigned int start_addr = 0;
 	unsigned int end_addr = 0;
 
-	if (memdesc->size == 0 || memdesc->gpuaddr == 0 ||
-		!(KGSL_MEMDESC_MAPPED & memdesc->priv))
-		return -EINVAL;
-
-	if (kgsl_mmu_type == KGSL_MMU_TYPE_NONE)
+	if (memdesc->size == 0 || memdesc->gpuaddr == 0)
 		return 0;
+
+	if (kgsl_mmu_type == KGSL_MMU_TYPE_NONE) {
+		memdesc->gpuaddr = 0;
+		return 0;
+	}
 
 	/* Add space for the guard page when freeing the mmu VA. */
 	size = memdesc->size;
@@ -835,7 +747,7 @@ kgsl_mmu_unmap(struct kgsl_pagetable *pagetable,
 
 	if (KGSL_MMU_TYPE_IOMMU != kgsl_mmu_get_mmutype())
 		spin_lock(&pagetable->lock);
-	pagetable->pt_ops->mmu_unmap(pagetable, memdesc,
+	pagetable->pt_ops->mmu_unmap(pagetable->priv, memdesc,
 					&pagetable->tlb_flags);
 
 	/* If buffer is unmapped 0 fault addr */
@@ -850,8 +762,24 @@ kgsl_mmu_unmap(struct kgsl_pagetable *pagetable,
 	pagetable->stats.mapped -= size;
 
 	spin_unlock(&pagetable->lock);
+
+	pool = pagetable->pool;
+
+	if (KGSL_MMU_TYPE_IOMMU == kgsl_mmu_get_mmutype()) {
+		if (kgsl_memdesc_is_global(memdesc))
+			pool = pagetable->kgsl_pool;
+		else if (kgsl_memdesc_use_cpu_map(memdesc))
+			pool = NULL;
+	}
+	if (pool)
+		gen_pool_free(pool, memdesc->gpuaddr, size);
+
+	/*
+	 * Don't clear the gpuaddr on global mappings because they
+	 * may be in use by other pagetables
+	 */
 	if (!kgsl_memdesc_is_global(memdesc))
-		memdesc->priv &= ~KGSL_MEMDESC_MAPPED;
+		memdesc->gpuaddr = 0;
 	return 0;
 }
 EXPORT_SYMBOL(kgsl_mmu_unmap);
@@ -872,24 +800,20 @@ int kgsl_mmu_map_global(struct kgsl_pagetable *pagetable,
 	gpuaddr = memdesc->gpuaddr;
 	memdesc->priv |= KGSL_MEMDESC_GLOBAL;
 
-	result = kgsl_mmu_get_gpuaddr(pagetable, memdesc);
-	if (result)
-		goto error;
 	result = kgsl_mmu_map(pagetable, memdesc);
 	if (result)
-		goto error_put_gpuaddr;
+		goto error;
 
 	/*global mappings must have the same gpu address in all pagetables*/
 	if (gpuaddr && gpuaddr != memdesc->gpuaddr) {
-		KGSL_CORE_ERR("pt %p addr mismatch phys %pa gpu 0x%0x 0x%08x",
-		     pagetable, &memdesc->physaddr, gpuaddr, memdesc->gpuaddr);
+		KGSL_CORE_ERR("pt %p addr mismatch phys 0x%08x"
+			"gpu 0x%0x 0x%08x", pagetable, memdesc->physaddr,
+			gpuaddr, memdesc->gpuaddr);
 		goto error_unmap;
 	}
 	return result;
 error_unmap:
 	kgsl_mmu_unmap(pagetable, memdesc);
-error_put_gpuaddr:
-	kgsl_mmu_put_gpuaddr(pagetable, memdesc);
 error:
 	return result;
 }
@@ -977,16 +901,15 @@ void kgsl_mmu_set_mmutype(char *mmutype)
 }
 EXPORT_SYMBOL(kgsl_mmu_set_mmutype);
 
-int kgsl_mmu_gpuaddr_in_range(struct kgsl_pagetable *pt, unsigned int gpuaddr)
+int kgsl_mmu_gpuaddr_in_range(unsigned int gpuaddr)
 {
 	if (KGSL_MMU_TYPE_NONE == kgsl_mmu_type)
 		return 1;
-	if (gpuaddr >= kgsl_mmu_get_base_addr(pt->mmu) &&
-		gpuaddr < kgsl_mmu_get_base_addr(pt->mmu) +
-		kgsl_mmu_get_ptsize(pt->mmu))
+	if (gpuaddr >= kgsl_mmu_get_base_addr() &&
+		gpuaddr < kgsl_mmu_get_base_addr() + kgsl_mmu_get_ptsize())
 		return 1;
 	if (kgsl_mmu_get_mmutype() == KGSL_MMU_TYPE_IOMMU
-		&& kgsl_mmu_is_perprocess(pt->mmu))
+		&& kgsl_mmu_is_perprocess())
 		return (gpuaddr > 0 && gpuaddr < TASK_SIZE);
 	return 0;
 }

@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -52,7 +52,6 @@ struct kgsl_snapshot_section_header {
 #define KGSL_SNAPSHOT_SECTION_DEBUG        0x0901
 #define KGSL_SNAPSHOT_SECTION_DEBUGBUS     0x0A01
 #define KGSL_SNAPSHOT_SECTION_GPU_OBJECT   0x0B01
-#define KGSL_SNAPSHOT_SECTION_MEMLIST      0x0E01
 
 #define KGSL_SNAPSHOT_SECTION_END          0xFFFF
 
@@ -102,17 +101,6 @@ struct kgsl_snapshot_rb {
 	int wptr;   /* Current index of the CPU write pointer */
 	int rptr;   /* Current index of the GPU read pointer */
 	int count;  /* Number of dwords in the dump */
-} __packed;
-
-/* Replay or Memory list section, both sections have same header */
-struct kgsl_snapshot_replay_mem_list {
-	/*
-	 * Number of IBs to replay for replay section or
-	 * number of memory list entries for mem list section
-	 */
-	int num_entries;
-	/* Pagetable base to which the replay IBs or memory entries belong */
-	__u32 ptbase;
 } __packed;
 
 /* Indirect buffer sub-section header */
@@ -320,17 +308,11 @@ void *kgsl_snapshot_indexed_registers(struct kgsl_device *device,
 	unsigned int data, unsigned int start, unsigned int count);
 
 /* Freeze a GPU buffer so it can be dumped in the snapshot */
-int kgsl_snapshot_get_object(struct kgsl_device *device, phys_addr_t ptbase,
+int kgsl_snapshot_get_object(struct kgsl_device *device, unsigned int ptbase,
 	unsigned int gpuaddr, unsigned int size, unsigned int type);
 
-int kgsl_snapshot_have_object(struct kgsl_device *device, phys_addr_t ptbase,
+int kgsl_snapshot_have_object(struct kgsl_device *device, unsigned int ptbase,
 	unsigned int gpuaddr, unsigned int size);
-
-struct adreno_ib_object_list;
-
-int kgsl_snapshot_add_ib_obj_list(struct kgsl_device *device,
-	phys_addr_t ptbase,
-	struct adreno_ib_object_list *ib_obj_list);
 
 #endif
 #endif

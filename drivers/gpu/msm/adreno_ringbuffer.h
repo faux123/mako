@@ -53,16 +53,17 @@ struct adreno_ringbuffer {
 	unsigned int sizedwords;
 
 	unsigned int wptr; /* write pointer offset in dwords from baseaddr */
+	unsigned int rptr; /* read pointer offset in dwords from baseaddr */
 
 	unsigned int global_ts;
 };
 
 
-#define GSL_RB_WRITE(device, ring, gpuaddr, data) \
+#define GSL_RB_WRITE(ring, gpuaddr, data) \
 	do { \
 		*ring = data; \
 		wmb(); \
-		kgsl_cffdump_setmem(device, gpuaddr, data, 4); \
+		kgsl_cffdump_setmem(gpuaddr, data, 4); \
 		ring++; \
 		gpuaddr += sizeof(uint); \
 	} while (0)
@@ -72,20 +73,10 @@ struct adreno_ringbuffer {
 
 /* mem rptr */
 #define GSL_RB_CNTL_NO_UPDATE 0x0 /* enable */
-
-/**
- * adreno_get_rptr - Get the current ringbuffer read pointer
- * @rb -  the ringbuffer
- *
- * Get the current read pointer, which is written by the GPU.
- */
-static inline unsigned int
-adreno_get_rptr(struct adreno_ringbuffer *rb)
-{
-	unsigned int result = rb->memptrs->rptr;
-	rmb();
-	return result;
-}
+#define GSL_RB_GET_READPTR(rb, data) \
+	do { \
+		*(data) = rb->memptrs->rptr; \
+	} while (0)
 
 #define GSL_RB_CNTL_POLL_EN 0x0 /* disable */
 
@@ -105,8 +96,6 @@ int adreno_ringbuffer_submitcmd(struct adreno_device *adreno_dev,
 		struct kgsl_cmdbatch *cmdbatch);
 
 int adreno_ringbuffer_init(struct kgsl_device *device);
-
-int adreno_ringbuffer_warm_start(struct adreno_ringbuffer *rb);
 
 int adreno_ringbuffer_start(struct adreno_ringbuffer *rb);
 

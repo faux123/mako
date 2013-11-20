@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2012,2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -335,6 +335,8 @@ void kgsl_cffdump_init()
 		return;
 	}
 
+	kgsl_cff_dump_enable = 0;
+
 	spin_lock_init(&cffdump_lock);
 
 	dir = debugfs_create_dir("cff", debugfs_dir);
@@ -358,54 +360,51 @@ void kgsl_cffdump_destroy()
 void kgsl_cffdump_open(struct kgsl_device *device)
 {
 	struct adreno_device *adreno_dev = ADRENO_DEVICE(device);
-	if (!device->cff_dump_enable)
+	if (!kgsl_cff_dump_enable)
 		return;
 
 	if (KGSL_MMU_TYPE_IOMMU == kgsl_mmu_get_mmutype()) {
-		kgsl_cffdump_memory_base(device,
-			KGSL_PAGETABLE_BASE,
-			KGSL_IOMMU_GLOBAL_MEM_BASE +
-			KGSL_IOMMU_GLOBAL_MEM_SIZE -
-			KGSL_PAGETABLE_BASE,
-			adreno_dev->gmem_size);
+		kgsl_cffdump_memory_base(device->id,
+			kgsl_mmu_get_base_addr(&device->mmu),
+			kgsl_mmu_get_ptsize(&device->mmu) +
+			KGSL_IOMMU_GLOBAL_MEM_SIZE, adreno_dev->gmem_size);
 	} else {
-		kgsl_cffdump_memory_base(device,
+		kgsl_cffdump_memory_base(device->id,
 			kgsl_mmu_get_base_addr(&device->mmu),
 			kgsl_mmu_get_ptsize(&device->mmu),
 			adreno_dev->gmem_size);
 	}
 }
 
-void kgsl_cffdump_memory_base(struct kgsl_device *device, unsigned int base,
+void kgsl_cffdump_memory_base(enum kgsl_deviceid device_id, unsigned int base,
 			      unsigned int range, unsigned gmemsize)
 {
-	if (!device->cff_dump_enable)
+	if (!kgsl_cff_dump_enable)
 		return;
-	cffdump_printline(device->id, CFF_OP_MEMORY_BASE, base,
+	cffdump_printline(device_id, CFF_OP_MEMORY_BASE, base,
 			range, gmemsize, 0, 0);
 }
 
-void kgsl_cffdump_hang(struct kgsl_device *device)
+void kgsl_cffdump_hang(enum kgsl_deviceid device_id)
 {
-	if (!device->cff_dump_enable)
+	if (!kgsl_cff_dump_enable)
 		return;
-	cffdump_printline(device->id, CFF_OP_HANG, 0, 0, 0, 0, 0);
+	cffdump_printline(device_id, CFF_OP_HANG, 0, 0, 0, 0, 0);
 }
 
-void kgsl_cffdump_close(struct kgsl_device *device)
+void kgsl_cffdump_close(enum kgsl_deviceid device_id)
 {
-	if (!device->cff_dump_enable)
+	if (!kgsl_cff_dump_enable)
 		return;
-	cffdump_printline(device->id, CFF_OP_EOF, 0, 0, 0, 0, 0);
+	cffdump_printline(device_id, CFF_OP_EOF, 0, 0, 0, 0, 0);
 }
 
 
-void kgsl_cffdump_user_event(struct kgsl_device *device,
-		unsigned int cff_opcode, unsigned int op1,
+void kgsl_cffdump_user_event(unsigned int cff_opcode, unsigned int op1,
 		unsigned int op2, unsigned int op3,
 		unsigned int op4, unsigned int op5)
 {
-	if (!device->cff_dump_enable)
+	if (!kgsl_cff_dump_enable)
 		return;
 	cffdump_printline(-1, cff_opcode, op1, op2, op3, op4, op5);
 }
@@ -416,7 +415,7 @@ void kgsl_cffdump_syncmem(struct kgsl_device *device,
 {
 	const void *src;
 
-	if (!device->cff_dump_enable)
+	if (!kgsl_cff_dump_enable)
 		return;
 
 	BUG_ON(memdesc == NULL);
@@ -425,9 +424,9 @@ void kgsl_cffdump_syncmem(struct kgsl_device *device,
 
 	src = (uint *)kgsl_gpuaddr_to_vaddr(memdesc, gpuaddr);
 	if (memdesc->hostptr == NULL) {
-		KGSL_CORE_ERR(
-		"no kernel map for gpuaddr: 0x%08x, m->host: 0x%p, phys: %pa\n",
-		gpuaddr, memdesc->hostptr, &memdesc->physaddr);
+		KGSL_CORE_ERR("no kernel mapping for "
+			"gpuaddr: 0x%08x, m->host: 0x%p, phys: 0x%08x\n",
+			gpuaddr, memdesc->hostptr, memdesc->physaddr);
 		return;
 	}
 
@@ -451,14 +450,11 @@ void kgsl_cffdump_syncmem(struct kgsl_device *device,
 	if (sizebytes > 0)
 		cffdump_printline(-1, CFF_OP_WRITE_MEM, gpuaddr, *(uint *)src,
 			0, 0, 0);
-	/* Unmap memory since kgsl_gpuaddr_to_vaddr was called */
-	kgsl_memdesc_unmap(memdesc);
 }
 
-void kgsl_cffdump_setmem(struct kgsl_device *device,
-			uint addr, uint value, uint sizebytes)
+void kgsl_cffdump_setmem(uint addr, uint value, uint sizebytes)
 {
-	if (!device || !device->cff_dump_enable)
+	if (!kgsl_cff_dump_enable)
 		return;
 
 	while (sizebytes > 3) {
@@ -474,37 +470,37 @@ void kgsl_cffdump_setmem(struct kgsl_device *device,
 				0, 0, 0);
 }
 
-void kgsl_cffdump_regwrite(struct kgsl_device *device, uint addr,
+void kgsl_cffdump_regwrite(enum kgsl_deviceid device_id, uint addr,
 	uint value)
 {
-	if (!device->cff_dump_enable)
+	if (!kgsl_cff_dump_enable)
 		return;
 
-	cffdump_printline(device->id, CFF_OP_WRITE_REG, addr, value,
+	cffdump_printline(device_id, CFF_OP_WRITE_REG, addr, value,
 			0, 0, 0);
 }
 
-void kgsl_cffdump_regpoll(struct kgsl_device *device, uint addr,
+void kgsl_cffdump_regpoll(enum kgsl_deviceid device_id, uint addr,
 	uint value, uint mask)
 {
-	if (!device->cff_dump_enable)
+	if (!kgsl_cff_dump_enable)
 		return;
 
-	cffdump_printline(device->id, CFF_OP_POLL_REG, addr, value,
+	cffdump_printline(device_id, CFF_OP_POLL_REG, addr, value,
 			mask, 0, 0);
 }
 
-void kgsl_cffdump_slavewrite(struct kgsl_device *device, uint addr, uint value)
+void kgsl_cffdump_slavewrite(uint addr, uint value)
 {
-	if (!device->cff_dump_enable)
+	if (!kgsl_cff_dump_enable)
 		return;
 
 	cffdump_printline(-1, CFF_OP_WRITE_REG, addr, value, 0, 0, 0);
 }
 
-int kgsl_cffdump_waitirq(struct kgsl_device *device)
+int kgsl_cffdump_waitirq(void)
 {
-	if (!device->cff_dump_enable)
+	if (!kgsl_cff_dump_enable)
 		return 0;
 
 	cffdump_printline(-1, CFF_OP_WAIT_IRQ, 0, 0, 0, 0, 0);
@@ -605,45 +601,3 @@ static void destroy_channel(void)
 	}
 }
 
-int kgsl_cff_dump_enable_set(void *data, u64 val)
-{
-	int ret = 0;
-	struct kgsl_device *device = (struct kgsl_device *)data;
-	int i;
-
-	mutex_lock(&kgsl_driver.devlock);
-	if (val) {
-		/* Check if CFF is on for some other device already */
-		for (i = 0; i < KGSL_DEVICE_MAX; i++) {
-			if (kgsl_driver.devp[i]) {
-				struct kgsl_device *device_temp =
-						kgsl_driver.devp[i];
-				if (device_temp->cff_dump_enable &&
-					device != device_temp) {
-					KGSL_CORE_ERR(
-					"CFF is on for another device %d\n",
-					device_temp->id);
-					ret = -EINVAL;
-					goto done;
-				}
-			}
-		}
-		if (!device->cff_dump_enable) {
-			device->cff_dump_enable = 1;
-		}
-	} else if (device->cff_dump_enable && !val) {
-		device->cff_dump_enable = 0;
-	}
-done:
-	mutex_unlock(&kgsl_driver.devlock);
-	return ret;
-}
-EXPORT_SYMBOL(kgsl_cff_dump_enable_set);
-
-int kgsl_cff_dump_enable_get(void *data, u64 *val)
-{
-	struct kgsl_device *device = (struct kgsl_device *)data;
-	*val = device->cff_dump_enable;
-	return 0;
-}
-EXPORT_SYMBOL(kgsl_cff_dump_enable_get);

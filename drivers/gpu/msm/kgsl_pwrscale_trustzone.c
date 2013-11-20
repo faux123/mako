@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2012, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -28,8 +28,9 @@
 
 struct tz_priv {
 	int governor;
+	unsigned int no_switch_cnt;
+	unsigned int skip_cnt;
 	struct kgsl_power_stats bin;
-	unsigned int idle_dcvs;
 };
 spinlock_t tz_lock;
 
@@ -37,38 +38,29 @@ spinlock_t tz_lock;
  * per frame for 60fps content.
  */
 #define FLOOR			5000
-/* CEILING is 50msec, larger than any standard
- * frame length, but less than the idle timer.
- */
-#define CEILING			50000
+#define SWITCH_OFF		200
+#define SWITCH_OFF_RESET_TH	40
+#define SKIP_COUNTER		500
 #define TZ_RESET_ID		0x3
 #define TZ_UPDATE_ID		0x4
-#define TZ_INIT_ID		0x6
 
+#ifdef CONFIG_MSM_SCM
 /* Trap into the TrustZone, and call funcs there. */
-static int __secure_tz_entry2(u32 cmd, u32 val1, u32 val2)
+static int __secure_tz_entry(u32 cmd, u32 val, u32 id)
 {
 	int ret;
 	spin_lock(&tz_lock);
-	/* sync memory before sending the commands to tz*/
 	__iowmb();
-	ret = scm_call_atomic2(SCM_SVC_IO, cmd, val1, val2);
+	ret = scm_call_atomic2(SCM_SVC_IO, cmd, val, id);
 	spin_unlock(&tz_lock);
 	return ret;
 }
-
-static int __secure_tz_entry3(u32 cmd, u32 val1, u32 val2,
-				u32 val3)
+#else
+static int __secure_tz_entry(u32 cmd, u32 val, u32 id)
 {
-	int ret;
-	spin_lock(&tz_lock);
-	/* sync memory before sending the commands to tz*/
-	__iowmb();
-	ret = scm_call_atomic3(SCM_SVC_IO, cmd, val1, val2,
-				val3);
-	spin_unlock(&tz_lock);
-	return ret;
+	return 0;
 }
+#endif /* CONFIG_MSM_SCM */
 
 static ssize_t tz_governor_show(struct kgsl_device *device,
 				struct kgsl_pwrscale *pwrscale,
@@ -105,12 +97,8 @@ static ssize_t tz_governor_store(struct kgsl_device *device,
 	else if (!strncmp(str, "performance", 11))
 		priv->governor = TZ_GOVERNOR_PERFORMANCE;
 
-	if (priv->governor == TZ_GOVERNOR_PERFORMANCE) {
+	if (priv->governor == TZ_GOVERNOR_PERFORMANCE)
 		kgsl_pwrctrl_pwrlevel_change(device, pwr->max_pwrlevel);
-		pwr->default_pwrlevel = pwr->max_pwrlevel;
-	} else {
-		pwr->default_pwrlevel = pwr->init_pwrlevel;
-	}
 
 	mutex_unlock(&device->mutex);
 	return count;
@@ -159,34 +147,27 @@ static void tz_idle(struct kgsl_device *device, struct kgsl_pwrscale *pwrscale)
 		(priv->bin.total_time < FLOOR))
 		return;
 
-	/* If there is an extended block of busy processing,
-	 * increase frequency.  Otherwise run the normal algorithm.
-	 */
-	if (priv->bin.busy_time > CEILING) {
-		val = -1;
-	} else if (priv->idle_dcvs) {
-		idle = priv->bin.total_time - priv->bin.busy_time;
-		idle = (idle > 0) ? idle : 0;
-		val = __secure_tz_entry2(TZ_UPDATE_ID, idle, device->id);
+	/* If the GPU has stayed in turbo mode for a while, *
+	 * stop writing out values. */
+	if (pwr->active_pwrlevel == 0) {
+		if (priv->no_switch_cnt > SWITCH_OFF) {
+			priv->skip_cnt++;
+			if (priv->skip_cnt > SKIP_COUNTER) {
+				priv->no_switch_cnt -= SWITCH_OFF_RESET_TH;
+				priv->skip_cnt = 0;
+			}
+			return;
+		}
+		priv->no_switch_cnt++;
 	} else {
-		if (pwr->step_mul > 1)
-			val = __secure_tz_entry3(TZ_UPDATE_ID,
-				(pwr->active_pwrlevel + 1)/2,
-				priv->bin.total_time, priv->bin.busy_time);
-		else
-			val = __secure_tz_entry3(TZ_UPDATE_ID,
-				pwr->active_pwrlevel,
-				priv->bin.total_time, priv->bin.busy_time);
+		priv->no_switch_cnt = 0;
 	}
 
+	idle = priv->bin.total_time - priv->bin.busy_time;
 	priv->bin.total_time = 0;
 	priv->bin.busy_time = 0;
-
-	/* If the decision is to move to a lower level, make sure the GPU
-	 * frequency drops.
-	 */
-	if (val > 0)
-		val *= pwr->step_mul;
+	idle = (idle > 0) ? idle : 0;
+	val = __secure_tz_entry(TZ_UPDATE_ID, idle, device->id);
 	if (val)
 		kgsl_pwrctrl_pwrlevel_change(device,
 					     pwr->active_pwrlevel + val);
@@ -203,7 +184,8 @@ static void tz_sleep(struct kgsl_device *device,
 {
 	struct tz_priv *priv = pwrscale->priv;
 
-	__secure_tz_entry2(TZ_RESET_ID, 0, 0);
+	__secure_tz_entry(TZ_RESET_ID, 0, device->id);
+	priv->no_switch_cnt = 0;
 	priv->bin.total_time = 0;
 	priv->bin.busy_time = 0;
 }
@@ -211,32 +193,16 @@ static void tz_sleep(struct kgsl_device *device,
 #ifdef CONFIG_MSM_SCM
 static int tz_init(struct kgsl_device *device, struct kgsl_pwrscale *pwrscale)
 {
-	int i = 0, j = 1, ret = 0;
 	struct tz_priv *priv;
-	struct kgsl_pwrctrl *pwr = &device->pwrctrl;
-	unsigned int tz_pwrlevels[KGSL_MAX_PWRLEVELS + 1];
 
 	priv = pwrscale->priv = kzalloc(sizeof(struct tz_priv), GFP_KERNEL);
 	if (pwrscale->priv == NULL)
 		return -ENOMEM;
-	priv->idle_dcvs = 0;
+
 	priv->governor = TZ_GOVERNOR_ONDEMAND;
 	spin_lock_init(&tz_lock);
 	kgsl_pwrscale_policy_add_files(device, pwrscale, &tz_attr_group);
-	for (i = 0; i < pwr->num_pwrlevels - 1; i++) {
-		if (i == 0)
-			tz_pwrlevels[j] = pwr->pwrlevels[i].gpu_freq;
-		else if (pwr->pwrlevels[i].gpu_freq !=
-				pwr->pwrlevels[i - 1].gpu_freq) {
-			j++;
-			tz_pwrlevels[j] = pwr->pwrlevels[i].gpu_freq;
-		}
-	}
-	tz_pwrlevels[0] = j;
-	ret = scm_call(SCM_SVC_DCVS, TZ_INIT_ID, tz_pwrlevels,
-				sizeof(tz_pwrlevels), NULL, 0);
-	if (ret)
-		priv->idle_dcvs = 1;
+
 	return 0;
 }
 #else

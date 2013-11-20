@@ -5,12 +5,7 @@ Qualcomm Adreno GPU
 Required properties:
 - label:		A string used as a descriptive name for the device.
 - compatible:		Must be "qcom,kgsl-3d0" and "qcom,kgsl-3d"
-- reg:			Specifies the register base address and size. The second interval
-			specifies the shader memory base address and size.
-- reg-names:		Resource names used for the physical address of device registers
-			and shader memory. "kgsl_3d0_reg_memory" gives the physical address
-			and length of device registers while "kgsl_3d0_shader_memory" gives
-			physical address and length of device shader memory.
+- reg:			Specifies the base address and address size for this device.
 - interrupts:		Interrupt mapping for GPU IRQ.
 - interrupt-names:	String property to describe the name of the interrupt.
 - qcom,id:		An integer used as an identification number for the device.
@@ -62,26 +57,11 @@ DCVS Core info
 Optional Properties:
 - qcom,initial-powerlevel: This value indicates which qcom,gpu-pwrlevel should be used at start time
 			   and when coming back out of resume
-- qcom,step-pwrlevel:	   How many qcom,gpu-pwrlevel should be decremented at once
 - qcom,idle-timeout:	   This property represents the time in microseconds for idle timeout.
+- qcom,nap-allowed:	   Boolean. <0> or <1> to disable/enable nap.
 - qcom,chipid:		   If it exists this property is used to replace
 			   the chip identification read from the GPU hardware.
 			   This is used to override faulty hardware readings.
-- qcom,strtstp-sleepwake:  Boolean. Enables use of GPU SLUMBER instead of SLEEP for power savings
-
-The following properties are optional as collecting data via coresight might
-not be supported for every chipset. The documentation for coresight
-properties can be found in:
-Documentation/devicetree/bindings/coresight/coresight.txt
-
-- coresight-id           Unique integer identifier for the bus.
-- coresight-name         Unique descriptive name of the bus.
-- coresight-nr-inports   Number of input ports on the bus.
-- coresight-outports     List of output port numbers on the bus.
-- coresight-child-list   List of phandles pointing to the children of this
-                         component.
-- coresight-child-ports  List of input port numbers of the children.
-
 
 Example of A330 GPU in MSM8974:
 
@@ -89,9 +69,8 @@ Example of A330 GPU in MSM8974:
 	qcom,kgsl-3d0@fdb00000 {
 		label = "kgsl-3d0";
 		compatible = "qcom,kgsl-3d0", "qcom,kgsl-3d";
-		reg = <0xfdb00000 0x10000
-		       0xfdb20000 0x10000>;
-		reg-names = "kgsl_3d0_reg_memory", "kgsl_3d0_shader_memory";
+		reg = <0xfdb00000 0x20000>;
+		reg-names = "kgsl_3d0_reg_memory";
 		interrupts = <0 33 0>;
 		interrupt-names = "kgsl_3d0_irq";
 		qcom,id = <0>;
@@ -102,6 +81,7 @@ Example of A330 GPU in MSM8974:
 
 		qcom,initial-pwrlevel = <1>;
 		qcom,idle-timeout = <83>; //<HZ/12>
+		qcom,nap-allowed = <1>;
 		qcom,clk-map = <0x00000016>; //KGSL_CLK_CORE | KGSL_CLK_IFACE | KGSL_CLK_MEM_IFACE
 
 		/* Bus Scale Settings */

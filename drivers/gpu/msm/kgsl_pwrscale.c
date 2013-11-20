@@ -48,6 +48,9 @@ static struct kgsl_pwrscale_policy *kgsl_pwrscale_policies[] = {
 #ifdef CONFIG_MSM_SLEEP_STATS_DEVICE
 	&kgsl_pwrscale_policy_idlestats,
 #endif
+#ifdef CONFIG_MSM_DCVS
+	&kgsl_pwrscale_policy_msm,
+#endif
 	NULL
 };
 
@@ -234,15 +237,17 @@ EXPORT_SYMBOL(kgsl_pwrscale_wake);
 void kgsl_pwrscale_busy(struct kgsl_device *device)
 {
 	if (PWRSCALE_ACTIVE(device) && device->pwrscale.policy->busy)
-		device->pwrscale.policy->busy(device,
-				&device->pwrscale);
+		if (device->requested_state != KGSL_STATE_SLUMBER)
+			device->pwrscale.policy->busy(device,
+					&device->pwrscale);
 }
 EXPORT_SYMBOL(kgsl_pwrscale_busy);
 
 void kgsl_pwrscale_idle(struct kgsl_device *device)
 {
 	if (PWRSCALE_ACTIVE(device) && device->pwrscale.policy->idle)
-		if (device->state == KGSL_STATE_ACTIVE)
+		if (device->requested_state != KGSL_STATE_SLUMBER &&
+			device->requested_state != KGSL_STATE_SLEEP)
 			device->pwrscale.policy->idle(device,
 					&device->pwrscale);
 }
@@ -303,8 +308,6 @@ static void _kgsl_pwrscale_detach_policy(struct kgsl_device *device)
 
 		kgsl_pwrctrl_pwrlevel_change(device,
 				device->pwrctrl.max_pwrlevel);
-		device->pwrctrl.default_pwrlevel =
-				device->pwrctrl.max_pwrlevel;
 	}
 	device->pwrscale.policy = NULL;
 }
@@ -337,8 +340,6 @@ int kgsl_pwrscale_attach_policy(struct kgsl_device *device,
 
 	device->pwrscale.policy = policy;
 
-	device->pwrctrl.default_pwrlevel =
-			device->pwrctrl.init_pwrlevel;
 	/* Pwrscale is enabled by default at attach time */
 	kgsl_pwrscale_enable(device);
 

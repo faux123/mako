@@ -52,15 +52,15 @@
 #define MIN_FREQUENCY_UP_THRESHOLD		(11)
 #define MAX_FREQUENCY_UP_THRESHOLD		(100)
 #define MIN_FREQUENCY_DOWN_DIFFERENTIAL		(1)
-#define DBS_INPUT_EVENT_MIN_FREQ		(1190400)
+#define DBS_INPUT_EVENT_MIN_FREQ		(1242000)
 #define DEF_UI_DYNAMIC_SAMPLING_RATE		(30000)
 #define DBS_UI_SAMPLING_MIN_TIMEOUT		(30)
 #define DBS_UI_SAMPLING_MAX_TIMEOUT		(1000)
 #define DBS_UI_SAMPLING_TIMEOUT			(80)
 
 #define DEF_FREQ_STEP				(25)
-#define DEF_STEP_UP_EARLY_HISPEED		(1190400)
-#define DEF_STEP_UP_INTERIM_HISPEED		(1728000)
+#define DEF_STEP_UP_EARLY_HISPEED		(1134000)
+#define DEF_STEP_UP_INTERIM_HISPEED		(1350000)
 #define DEF_SAMPLING_EARLY_HISPEED_FACTOR	(2)
 #define DEF_SAMPLING_INTERIM_HISPEED_FACTOR	(3)
 
@@ -82,22 +82,22 @@ static unsigned long stored_sampling_rate;
 #endif
 
 #if defined(SMART_UP_PLUS)
-static unsigned int SUP_THRESHOLD_STEPS[SUP_MAX_STEP] = {75, 85, 90};
+static unsigned int SUP_THRESHOLD_STEPS[SUP_MAX_STEP] = {75, 85, 95};
 static unsigned int SUP_FREQ_STEPS[SUP_MAX_STEP] = {4, 3, 2};
 //static unsigned int min_range = 108000;
 typedef struct{
 	unsigned int freq_idx;
 	unsigned int freq_value;
 } freq_table_idx;
-freq_table_idx pre_freq_idx[SUP_CORE_NUM] = {};
+static freq_table_idx pre_freq_idx[SUP_CORE_NUM] = {};
 
 #endif
 
 
 #if defined(SMART_UP_SLOW_UP_AT_HIGH_FREQ)
 
-#define SUP_SLOW_UP_FREQUENCY 		(1574400)
-#define SUP_HIGH_SLOW_UP_FREQUENCY 	(1728000)
+#define SUP_SLOW_UP_FREQUENCY 		(1350000)
+#define SUP_HIGH_SLOW_UP_FREQUENCY 	(1512000)
 #define SUP_SLOW_UP_LOAD 		(90)
 
 typedef struct {
@@ -105,14 +105,14 @@ typedef struct {
 	unsigned int hist_load_cnt;
 } history_load;
 static void reset_hist(history_load *hist_load);
-history_load hist_load[SUP_CORE_NUM] = {};
+static history_load hist_load[SUP_CORE_NUM] = {};
 
 typedef struct {
 	unsigned int hist_max_load[SUP_HIGH_SLOW_UP_DUR];
 	unsigned int hist_load_cnt;
 } history_load_high;
 static void reset_hist_high(history_load_high *hist_load);
-history_load_high hist_load_high[SUP_CORE_NUM] = {};
+static history_load_high hist_load_high[SUP_CORE_NUM] = {};
 
 #endif
 
@@ -1177,7 +1177,7 @@ static ssize_t store_step_up_interim_hispeed(struct kobject *a,
 	int ret;
 	ret = sscanf(buf, "%u", &input);
 
-	if (ret != 1 || input > 2265600 ||
+	if (ret != 1 || input > 1512000 ||
 			input < 0) {
 		return -EINVAL;
 	}

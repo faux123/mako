@@ -416,6 +416,9 @@ static void anon_vma_ctor(void *data)
 
 	mutex_init(&anon_vma->mutex);
 	atomic_set(&anon_vma->refcount, 0);
+#ifdef CONFIG_ZSWAP
+	atomic_set(&anon_vma->swapra_miss, 0);
+#endif
 	INIT_LIST_HEAD(&anon_vma->head);
 }
 

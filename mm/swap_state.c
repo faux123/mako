@@ -19,6 +19,9 @@
 #include <linux/page_cgroup.h>
 
 #include <asm/pgtable.h>
+#ifdef CONFIG_ZSWAP
+#include "internal.h"
+#endif
 
 /*
  * swapper_space is a fiction, retained to simplify the path through
@@ -66,7 +69,11 @@ void show_swap_cache_info(void)
  * __add_to_swap_cache resembles add_to_page_cache_locked on swapper_space,
  * but sets SwapCache flag and private instead of mapping and index.
  */
+#ifdef CONFIG_ZSWAP
+int __add_to_swap_cache(struct page *page, swp_entry_t entry)
+#else
 static int __add_to_swap_cache(struct page *page, swp_entry_t entry)
+#endif
 {
 	int error;
 
@@ -377,6 +384,12 @@ struct page *swapin_readahead(swp_entry_t entry, gfp_t gfp_mask,
 	unsigned long start_offset, end_offset;
 	unsigned long mask = (1UL << page_cluster) - 1;
 
+#ifdef CONFIG_ZSWAP
+	swap_cache_miss(vma);
+	if (swap_cache_skip_readahead(vma))
+		goto skip;
+#endif
+
 	/* Read a page_cluster sized and aligned cluster around offset. */
 	start_offset = offset & ~mask;
 	end_offset = offset | mask;
@@ -392,5 +405,8 @@ struct page *swapin_readahead(swp_entry_t entry, gfp_t gfp_mask,
 		page_cache_release(page);
 	}
 	lru_add_drain();	/* Push any new pages onto the LRU now */
+#ifdef CONFIG_ZSWAP
+skip:
+#endif
 	return read_swap_cache_async(entry, gfp_mask, vma, addr);
 }

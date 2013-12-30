@@ -2950,6 +2950,10 @@ static int do_swap_page(struct mm_struct *mm, struct vm_area_struct *vma,
 		delayacct_clear_flag(DELAYACCT_PF_SWAPIN);
 		goto out_release;
 	}
+#ifdef CONFIG_ZSWAP
+	else if (!(flags & FAULT_FLAG_TRIED))
+		swap_cache_hit(vma);
+#endif
 
 	locked = lock_page_or_retry(page, mm, flags);
 	delayacct_clear_flag(DELAYACCT_PF_SWAPIN);

@@ -2832,7 +2832,7 @@ static int __init futex_init(void)
 	futex_queues = alloc_large_system_hash("futex", sizeof(*futex_queues),
 					       futex_hashsize, 0,
 					       futex_hashsize < 256 ? HASH_SMALL : 0,
-					       NULL, NULL, futex_hashsize, futex_hashsize);
+					       NULL, NULL, futex_hashsize);
 
 	/*
 	 * This will fail and we want it. Some arch implementations do

@@ -2,8 +2,8 @@
  *
  * MSM architecture cpufreq turbo boost driver
  *
- * Copyright (c) 2012-2013, Paul Reioux. All rights reserved.
- * Author: Paul Reioux <faux123@gmail.com>
+ * Copyright (c) 2012-2014, Paul Reioux. All rights reserved.
+ * Author: Paul Reioux <reioux@gmail.com>
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -50,7 +50,7 @@ static void msm_turbo_boost_exit(void)
 module_init(msm_turbo_boost_init);
 module_exit(msm_turbo_boost_exit);
 
-MODULE_LICENSE("PROPRIETARY");
+MODULE_LICENSE("GPL V2");
 MODULE_AUTHOR("Paul Reioux <reioux@gmail.com>");
 MODULE_DESCRIPTION("MSM turbo boost module");
 

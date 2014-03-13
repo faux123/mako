@@ -1,7 +1,7 @@
 /*
  * Author: Paul Reioux aka Faux123 <reioux@gmail.com>
  *
- * Copyright 2012-2013 Paul Reioux
+ * Copyright 2012-2014 Paul Reioux
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -24,9 +24,11 @@
 #include <mach/cpufreq.h>
 
 #define MSM_CPUFREQ_LIMIT_MAJOR		1
-#define MSM_CPUFREQ_LIMIT_MINOR		1
+#define MSM_CPUFREQ_LIMIT_MINOR		2
 
-static uint32_t limited_max_freq = MSM_CPUFREQ_NO_LIMIT;
+//#define DEBUG_CPU_LIMITER
+
+uint32_t limited_max_freq = 2265600;
 
 static int update_cpu_max_freq(int cpu, uint32_t max_freq)
 {
@@ -37,13 +39,14 @@ static int update_cpu_max_freq(int cpu, uint32_t max_freq)
 		return ret;
 
 	limited_max_freq = max_freq;
+#ifdef DEBUG_CPU_LIMITER
 	if (max_freq != MSM_CPUFREQ_NO_LIMIT)
 		pr_info("%s: Limiting cpu%d max frequency to %d\n",
 			__func__, cpu, max_freq);
 	else
 		pr_info("%s: Max frequency reset for cpu%d\n",
 			__func__, cpu);
-
+#endif
 	ret = cpufreq_update_policy(cpu);
 
 	return ret;

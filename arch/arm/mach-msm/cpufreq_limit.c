@@ -1,7 +1,7 @@
 /*
  * Author: Paul Reioux aka Faux123 <reioux@gmail.com>
  *
- * Copyright 2012 Paul Reioux
+ * Copyright 2012-2013 Paul Reioux
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -23,7 +23,8 @@
 
 #include <mach/cpufreq.h>
 
-#define MSM_CPUFREQ_LIMIT_VERSION 1
+#define MSM_CPUFREQ_LIMIT_MAJOR		1
+#define MSM_CPUFREQ_LIMIT_MINOR		1
 
 static uint32_t limited_max_freq = MSM_CPUFREQ_NO_LIMIT;
 
@@ -37,22 +38,25 @@ static int update_cpu_max_freq(int cpu, uint32_t max_freq)
 
 	limited_max_freq = max_freq;
 	if (max_freq != MSM_CPUFREQ_NO_LIMIT)
-		pr_info("msm_cpufreq_limit: Limiting cpu%d max frequency to %d\n",
-				cpu, max_freq);
+		pr_info("%s: Limiting cpu%d max frequency to %d\n",
+			__func__, cpu, max_freq);
 	else
-		pr_info("msm_cpufreq_limit: Max frequency reset for cpu%d\n", cpu);
+		pr_info("%s: Max frequency reset for cpu%d\n",
+			__func__, cpu);
 
 	ret = cpufreq_update_policy(cpu);
 
 	return ret;
 }
 
-static ssize_t msm_cpufreq_limit_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+static ssize_t msm_cpufreq_limit_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
 {
 	return sprintf(buf, "%u\n", limited_max_freq);
 }
 
-static ssize_t msm_cpufreq_limit_store(struct kobject *kobj, struct kobj_attribute *attr, const char *buf, size_t count)
+static ssize_t msm_cpufreq_limit_store(struct kobject *kobj,
+		struct kobj_attribute *attr, const char *buf, size_t count)
 {
 	int cpu = 0;
 	int ret = 0;
@@ -63,8 +67,8 @@ static ssize_t msm_cpufreq_limit_store(struct kobject *kobj, struct kobj_attribu
 		for_each_possible_cpu(cpu) {
 			ret = update_cpu_max_freq(cpu, data);
 			if (ret)
-				pr_debug("Unable to limit cpu%d max freq to %d\n",
-						cpu, data);
+				pr_debug("can't limit cpu%d max freq to %d\n",
+					cpu, data);
 		}
 		if (!ret)
 			limited_max_freq = data;
@@ -73,16 +77,22 @@ static ssize_t msm_cpufreq_limit_store(struct kobject *kobj, struct kobj_attribu
 	return count;
 }
 
-static ssize_t msm_cpufreq_limit_version_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
+static ssize_t msm_cpufreq_limit_version_show(struct kobject *kobj,
+		struct kobj_attribute *attr, char *buf)
 {
-	return sprintf(buf, "version: %u\n", MSM_CPUFREQ_LIMIT_VERSION);
+	return sprintf(buf, "version: %u.%u\n",
+			MSM_CPUFREQ_LIMIT_MAJOR, MSM_CPUFREQ_LIMIT_MINOR);
 }
 
 static struct kobj_attribute msm_cpufreq_limit_attribute = 
-	__ATTR(cpufreq_limit, 0666, msm_cpufreq_limit_show, msm_cpufreq_limit_store);
+	__ATTR(cpufreq_limit, 0666,
+		msm_cpufreq_limit_show,
+		msm_cpufreq_limit_store);
 
 static struct kobj_attribute msm_cpufreq_limit_version_attribute = 
-	__ATTR(msm_cpufreq_limit_version, 0444 , msm_cpufreq_limit_version_show, NULL);
+	__ATTR(msm_cpufreq_limit_version, 0444 ,
+		msm_cpufreq_limit_version_show,
+		NULL);
 
 static struct attribute *msm_cpufreq_limit_attrs[] =
 	{
@@ -102,16 +112,20 @@ static int msm_cpufreq_limit_init(void)
 {
 	int sysfs_result;
 
-	msm_cpufreq_limit_kobj = kobject_create_and_add("msm_cpufreq_limit", kernel_kobj);
+	msm_cpufreq_limit_kobj =
+		kobject_create_and_add("msm_cpufreq_limit", kernel_kobj);
 	if (!msm_cpufreq_limit_kobj) {
-		pr_err("%s msm_cpufreq_limit_kobj kobject create failed!\n", __FUNCTION__);
+		pr_err("%s msm_cpufreq_limit_kobj kobject create failed!\n",
+			__func__);
 		return -ENOMEM;
         }
 
-	sysfs_result = sysfs_create_group(msm_cpufreq_limit_kobj, &msm_cpufreq_limit_attr_group);
+	sysfs_result = sysfs_create_group(msm_cpufreq_limit_kobj,
+			&msm_cpufreq_limit_attr_group);
 
         if (sysfs_result) {
-		pr_info("%s msm_cpufreq_limit_kobj create failed!\n", __FUNCTION__);
+		pr_info("%s msm_cpufreq_limit_kobj create failed!\n",
+			__func__);
 		kobject_put(msm_cpufreq_limit_kobj);
 	}
 	return sysfs_result;

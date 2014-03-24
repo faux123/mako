@@ -276,7 +276,7 @@ static int __cpuinit msm_cpufreq_init(struct cpufreq_policy *policy)
 		cur_freq = table[index].frequency;
 	}
 
-	policy->cur = CONFIG_MSM_CPU_FREQ_MAX;
+	policy->cur = cur_freq;
 
 	policy->cpuinfo.transition_latency =
 		acpuclk_get_switch_time() * NSEC_PER_USEC;

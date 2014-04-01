@@ -30,7 +30,7 @@
 #undef DEBUG_INTELLI_PLUG
 
 #define INTELLI_PLUG_MAJOR_VERSION	2
-#define INTELLI_PLUG_MINOR_VERSION	2
+#define INTELLI_PLUG_MINOR_VERSION	3
 
 #define DEF_SAMPLING_MS			(1000)
 #define BUSY_SAMPLING_MS		(500)
@@ -40,8 +40,6 @@
 #define QUAD_CORE_PERSISTENCE		3
 
 #define BUSY_PERSISTENCE		10
-
-#define RUN_QUEUE_THRESHOLD		38
 
 #define CPU_DOWN_FACTOR			2
 
@@ -59,7 +57,8 @@ module_param(intelli_plug_active, uint, 0644);
 static unsigned int eco_mode_active = 0;
 module_param(eco_mode_active, uint, 0644);
 
-static unsigned int sampling_time = 0;
+//default to something sane rather than zero
+static unsigned int sampling_time = DEF_SAMPLING_MS;
 
 static unsigned int persist_count = 0;
 static unsigned int busy_persist_count = 0;
@@ -362,30 +361,11 @@ static void intelli_plug_input_event(struct input_handle *handle,
 		msecs_to_jiffies(10));
 }
 
-static int input_dev_filter(const char *input_dev_name)
-{
-	if (strstr(input_dev_name, "touchscreen") ||
-		strstr(input_dev_name, "sec_touchscreen") ||
-		strstr(input_dev_name, "touch_dev") ||
-		strstr(input_dev_name, "-keypad") ||
-		strstr(input_dev_name, "-nav") ||
-		strstr(input_dev_name, "-oj")) {
-		pr_info("touch dev: %s\n", input_dev_name);
-		return 0;
-	} else {
-		pr_info("touch dev: %s\n", input_dev_name);
-		return 1;
-	}
-}
-
 static int intelli_plug_input_connect(struct input_handler *handler,
 		struct input_dev *dev, const struct input_device_id *id)
 {
 	struct input_handle *handle;
 	int error;
-
-	if (input_dev_filter(dev->name))
-		return -ENODEV;
 
 	handle = kzalloc(sizeof(struct input_handle), GFP_KERNEL);
 	if (!handle)
@@ -419,7 +399,21 @@ static void intelli_plug_input_disconnect(struct input_handle *handle)
 }
 
 static const struct input_device_id intelli_plug_ids[] = {
-	{ .driver_info = 1 },
+	{
+		.flags = INPUT_DEVICE_ID_MATCH_EVBIT |
+			 INPUT_DEVICE_ID_MATCH_ABSBIT,
+		.evbit = { BIT_MASK(EV_ABS) },
+		.absbit = { [BIT_WORD(ABS_MT_POSITION_X)] =
+			    BIT_MASK(ABS_MT_POSITION_X) |
+			    BIT_MASK(ABS_MT_POSITION_Y) },
+	}, /* multi-touch touchscreen */
+	{
+		.flags = INPUT_DEVICE_ID_MATCH_KEYBIT |
+			 INPUT_DEVICE_ID_MATCH_ABSBIT,
+		.keybit = { [BIT_WORD(BTN_TOUCH)] = BIT_MASK(BTN_TOUCH) },
+		.absbit = { [BIT_WORD(ABS_X)] =
+			    BIT_MASK(ABS_X) | BIT_MASK(ABS_Y) },
+	}, /* touchpad */
 	{ },
 };
 

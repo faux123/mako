@@ -306,4 +306,9 @@ config RESTRICT_ROOTFS_SLAVE
 	  Android init.rc.  If this volume is unavailable, then we fall back to the
 	  previous behavior of marking the entire filesystem hierarchy as slave.
 
+config AIO_OPTIMIZATION
+	bool "AIO kernel optimization patches"
+	default y
+	help
+	  An experimental AIO FS kernel optimization
 endmenu

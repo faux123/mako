@@ -28,7 +28,7 @@
 #undef DEBUG_INTELLI_PLUG
 
 #define INTELLI_PLUG_MAJOR_VERSION	2
-#define INTELLI_PLUG_MINOR_VERSION	4
+#define INTELLI_PLUG_MINOR_VERSION	5
 
 #define DEF_SAMPLING_MS			(500)
 #define BUSY_SAMPLING_MS		(250)
@@ -62,6 +62,16 @@ static unsigned int persist_count = 0;
 static unsigned int busy_persist_count = 0;
 
 static bool suspended = false;
+
+struct ip_cpu_info {
+	int cpu;
+	unsigned int curr_max;
+};
+
+static DEFINE_PER_CPU(struct ip_cpu_info, ip_info);
+
+static unsigned int screen_off_max = UINT_MAX;
+module_param(screen_off_max, uint, 0644);
 
 #define NR_FSHIFT	3
 static unsigned int nr_fshift = NR_FSHIFT;
@@ -301,6 +311,35 @@ static void __cpuinit intelli_plug_work_fn(struct work_struct *work)
 }
 
 #ifdef CONFIG_HAS_EARLYSUSPEND
+static void screen_off_limit(bool on)
+{
+	unsigned int i, ret;
+	struct cpufreq_policy policy;
+	struct ip_cpu_info *l_ip_info;
+
+	/* not active, so exit */
+	if (screen_off_max == UINT_MAX)
+		return;
+
+	for_each_online_cpu(i) {
+
+		l_ip_info = &per_cpu(ip_info, i);
+		ret = cpufreq_get_policy(&policy, i);
+		if (ret)
+			continue;
+
+		if (on) {
+			/* save current instance */
+			l_ip_info->curr_max = policy.max;
+			policy.max = screen_off_max;
+		} else {
+			/* restore */
+			policy.max = l_ip_info->curr_max;
+		}
+		cpufreq_update_policy(i);
+	}
+}
+
 static void intelli_plug_early_suspend(struct early_suspend *handler)
 {
 	int i;
@@ -310,6 +349,7 @@ static void intelli_plug_early_suspend(struct early_suspend *handler)
 
 	mutex_lock(&intelli_plug_mutex);
 	suspended = true;
+	screen_off_limit(true);
 	mutex_unlock(&intelli_plug_mutex);
 
 	// put rest of the cores to sleep!
@@ -330,7 +370,6 @@ static void wakeup_boost(void)
 			continue;
 
 		policy.cur = policy.max;
-
 		cpufreq_update_policy(i);
 	}
 }
@@ -356,6 +395,7 @@ static void __cpuinit intelli_plug_late_resume(struct early_suspend *handler)
 		cpu_up(i);
 	}
 
+	screen_off_limit(false);
 	wakeup_boost();
 
 	queue_delayed_work_on(0, intelliplug_wq, &intelli_plug_work,

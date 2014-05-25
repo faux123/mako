@@ -31,7 +31,7 @@
 #undef DEBUG_INTELLI_PLUG
 
 #define INTELLI_PLUG_MAJOR_VERSION	2
-#define INTELLI_PLUG_MINOR_VERSION	5
+#define INTELLI_PLUG_MINOR_VERSION	6
 
 #define DEF_SAMPLING_MS			(1000)
 #define BUSY_SAMPLING_MS		(500)
@@ -57,6 +57,9 @@ module_param(intelli_plug_active, uint, 0644);
 
 static unsigned int eco_mode_active = 0;
 module_param(eco_mode_active, uint, 0644);
+
+static unsigned int touch_boost_active = 1;
+module_param(touch_boost_active, uint, 0644);
 
 //default to something sane rather than zero
 static unsigned int sampling_time = DEF_SAMPLING_MS;
@@ -190,8 +193,9 @@ static void __cpuinit intelli_plug_boost_fn(struct work_struct *work)
 
 	int nr_cpus = num_online_cpus();
 
-	if (nr_cpus < 2)
-		cpu_up(1);
+	if (touch_boost_active)
+		if (nr_cpus < 2)
+			cpu_up(1);
 }
 
 static void __cpuinit intelli_plug_work_fn(struct work_struct *work)

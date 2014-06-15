@@ -30,8 +30,8 @@
 //#define DEBUG_INTELLI_PLUG
 #undef DEBUG_INTELLI_PLUG
 
-#define INTELLI_PLUG_MAJOR_VERSION	2
-#define INTELLI_PLUG_MINOR_VERSION	6
+#define INTELLI_PLUG_MAJOR_VERSION	3
+#define INTELLI_PLUG_MINOR_VERSION	0
 
 #define DEF_SAMPLING_MS			(1000)
 #define BUSY_SAMPLING_MS		(500)
@@ -61,6 +61,9 @@ module_param(eco_mode_active, uint, 0644);
 static unsigned int touch_boost_active = 1;
 module_param(touch_boost_active, uint, 0644);
 
+static unsigned int nr_run_profile_sel = 0;
+module_param(nr_run_profile_sel, uint, 0644);
+
 //default to something sane rather than zero
 static unsigned int sampling_time = DEF_SAMPLING_MS;
 
@@ -83,17 +86,45 @@ module_param(screen_off_max, uint, 0644);
 static unsigned int nr_fshift = NR_FSHIFT;
 module_param(nr_fshift, uint, 0644);
 
-static unsigned int nr_run_thresholds_full[] = {
+static unsigned int nr_run_thresholds_balance[] = {
 /* 	1,  2,  3,  4 - on-line cpus target */
 	5,  7,  9,  UINT_MAX /* avg run threads * 2 (e.g., 9 = 2.25 threads) */
 	};
+
+static unsigned int nr_run_thresholds_performance[] = {
+/* 	1,  2,  3,  4 - on-line cpus target */
+	3,  5,  7,  UINT_MAX /* avg run threads * 2 (e.g., 9 = 2.25 threads) */
+	};
+
+static unsigned int nr_run_thresholds_conservative[] = {
+/* 	1,  2,  3,  4 - on-line cpus target */
+	5, 13, 14,  UINT_MAX /* avg run threads * 2 (e.g., 9 = 2.25 threads) */
+};
 
 static unsigned int nr_run_thresholds_eco[] = {
 /*      1,  2, - on-line cpus target */
         3,  UINT_MAX /* avg run threads * 2 (e.g., 9 = 2.25 threads) */
         };
 
-static unsigned int nr_run_hysteresis = 4;  /* 0.5 thread */
+static unsigned int nr_run_thresholds_disable[] = {
+/* 	1,  2,  3,  4 - on-line cpus target */
+	0,  0,  0,  UINT_MAX /* avg run threads * 2 (e.g., 9 = 2.25 threads) */
+
+};
+
+static unsigned int *nr_run_profiles[] = {
+	nr_run_thresholds_balance,
+	nr_run_thresholds_performance,
+	nr_run_thresholds_conservative,
+	nr_run_thresholds_eco,
+	nr_run_thresholds_disable,
+};
+
+#define NR_RUN_ECO_MODE_PROFILE	3
+#define NR_RUN_HYSTERESIS_QUAD	8
+#define NR_RUN_HYSTERESIS_DUAL	4
+
+static unsigned int nr_run_hysteresis = NR_RUN_HYSTERESIS_QUAD;
 module_param(nr_run_hysteresis, uint, 0644);
 
 static unsigned int nr_run_last;
@@ -155,18 +186,21 @@ static unsigned int calculate_thread_stats(void)
 	unsigned int avg_nr_run = avg_nr_running();
 	unsigned int nr_run;
 	unsigned int threshold_size;
+	unsigned int *current_profile;
 
 	if (!eco_mode_active) {
-		threshold_size =  ARRAY_SIZE(nr_run_thresholds_full);
-		nr_run_hysteresis = 8;
+		current_profile = nr_run_profiles[nr_run_profile_sel];
+		threshold_size =
+			ARRAY_SIZE(nr_run_thresholds_balance);
 		nr_fshift = 3;
 #ifdef DEBUG_INTELLI_PLUG
 		pr_info("intelliplug: full mode active!");
 #endif
 	}
 	else {
-		threshold_size =  ARRAY_SIZE(nr_run_thresholds_eco);
-		nr_run_hysteresis = 4;
+		current_profile = nr_run_profiles[NR_RUN_ECO_MODE_PROFILE];
+		threshold_size =
+			ARRAY_SIZE(nr_run_thresholds_eco);
 		nr_fshift = 1;
 #ifdef DEBUG_INTELLI_PLUG
 		pr_info("intelliplug: eco mode active!");
@@ -175,10 +209,7 @@ static unsigned int calculate_thread_stats(void)
 
 	for (nr_run = 1; nr_run < threshold_size; nr_run++) {
 		unsigned int nr_threshold;
-		if (!eco_mode_active)
-			nr_threshold = nr_run_thresholds_full[nr_run - 1];
-		else
-			nr_threshold = nr_run_thresholds_eco[nr_run - 1];
+		nr_threshold = current_profile[nr_run - 1];
 
 		if (nr_run_last <= nr_run)
 			nr_threshold += nr_run_hysteresis;
@@ -207,7 +238,7 @@ static void __cpuinit intelli_plug_work_fn(struct work_struct *work)
 	unsigned int nr_cpus = 0;
 
 	int decision = 0;
-	int i;
+	int cpu, i;
 
 	if (intelli_plug_active == 1) {
 		nr_run_stat = calculate_thread_stats();
@@ -257,8 +288,9 @@ static void __cpuinit intelli_plug_work_fn(struct work_struct *work)
 					persist_count--;
 				if (persist_count == 0) {
 					//take down everyone
-					for (i = 3; i > 0; i--)
-						cpu_down(i);
+					for_each_online_cpu(cpu)
+						if (cpu != 0)
+							cpu_down(cpu);
 				}
 #ifdef DEBUG_INTELLI_PLUG
 				pr_info("case 1: %u\n", persist_count);
@@ -272,8 +304,9 @@ static void __cpuinit intelli_plug_work_fn(struct work_struct *work)
 					for (i = 1; i < cpu_count; i++)
 						cpu_up(i);
 				} else {
-					for (i = 3; i >  1; i--)
-						cpu_down(i);
+					for_each_online_cpu(cpu)
+						if (cpu > 1)
+							cpu_down(cpu);
 				}
 #ifdef DEBUG_INTELLI_PLUG
 				pr_info("case 2: %u\n", persist_count);
@@ -287,8 +320,9 @@ static void __cpuinit intelli_plug_work_fn(struct work_struct *work)
 					for (i = 1; i < cpu_count; i++)
 						cpu_up(i);
 				} else {
-					for (i = 3; i > 2; i--)
-						cpu_down(i);
+					for_each_online_cpu(cpu)
+						if (cpu > 2)
+							cpu_down(cpu);
 				}
 #ifdef DEBUG_INTELLI_PLUG
 				pr_info("case 3: %u\n", persist_count);
@@ -331,7 +365,6 @@ static void screen_off_limit(bool on)
 		return;
 
 	for_each_online_cpu(i) {
-
 		l_ip_info = &per_cpu(ip_info, i);
 		ret = cpufreq_get_policy(&policy, i);
 		if (ret)
@@ -351,8 +384,7 @@ static void screen_off_limit(bool on)
 
 static void intelli_plug_suspend(struct power_suspend *handler)
 {
-	int i;
-	int num_of_active_cores = num_possible_cpus();
+	int cpu;
 	
 	flush_workqueue(intelliplug_wq);
 
@@ -362,24 +394,24 @@ static void intelli_plug_suspend(struct power_suspend *handler)
 	mutex_unlock(&intelli_plug_mutex);
 
 	// put rest of the cores to sleep!
-	for (i = num_of_active_cores - 1; i > 0; i--) {
-		cpu_down(i);
+	for_each_online_cpu(cpu) {
+		if (cpu != 0)
+			cpu_down(cpu);
 	}
 }
 
 static void wakeup_boost(void)
 {
-	unsigned int i, ret;
+	unsigned int cpu, ret;
 	struct cpufreq_policy policy;
 
-	for_each_online_cpu(i) {
-
-		ret = cpufreq_get_policy(&policy, i);
+	for_each_online_cpu(cpu) {
+		ret = cpufreq_get_policy(&policy, cpu);
 		if (ret)
 			continue;
 
 		policy.cur = policy.max;
-		cpufreq_update_policy(i);
+		cpufreq_update_policy(cpu);
 	}
 }
 
@@ -499,6 +531,11 @@ int __init intelli_plug_init(void)
 	pr_info("intelli_plug: version %d.%d by faux123\n",
 		 INTELLI_PLUG_MAJOR_VERSION,
 		 INTELLI_PLUG_MINOR_VERSION);
+
+	if (num_possible_cpus() > 2)
+		nr_run_hysteresis = NR_RUN_HYSTERESIS_QUAD;
+	else
+		nr_run_hysteresis = NR_RUN_HYSTERESIS_DUAL;
 
 	rc = input_register_handler(&intelli_plug_input_handler);
 #ifdef CONFIG_POWERSUSPEND

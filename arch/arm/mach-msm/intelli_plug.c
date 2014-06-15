@@ -101,6 +101,8 @@ static unsigned int nr_run_last;
 static unsigned int NwNs_Threshold[] = { 19, 30,  19,  11,  19,  11, 0,  11};
 static unsigned int TwTs_Threshold[] = {140,  0, 140, 190, 140, 190, 0, 190};
 
+extern unsigned long avg_nr_running(void);
+
 static int mp_decision(void)
 {
 	static bool first_call = true;

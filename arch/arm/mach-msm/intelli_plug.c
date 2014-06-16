@@ -32,7 +32,7 @@
 #undef DEBUG_INTELLI_PLUG
 
 #define INTELLI_PLUG_MAJOR_VERSION	3
-#define INTELLI_PLUG_MINOR_VERSION	1
+#define INTELLI_PLUG_MINOR_VERSION	2
 
 #define DEF_SAMPLING_MS			(1000)
 #define BUSY_SAMPLING_MS		(500)
@@ -124,7 +124,10 @@ static unsigned int *nr_run_profiles[] = {
 #define NR_RUN_ECO_MODE_PROFILE	3
 #define NR_RUN_HYSTERESIS_QUAD	8
 #define NR_RUN_HYSTERESIS_DUAL	4
-#define CPU_NR_THRESHOLD	10
+#define CPU_NR_THRESHOLD	50
+
+static unsigned int cpu_nr_run_threshold = CPU_NR_THRESHOLD;
+module_param(cpu_nr_run_threshold, uint, 0644);
 
 static unsigned int nr_run_hysteresis = NR_RUN_HYSTERESIS_QUAD;
 module_param(nr_run_hysteresis, uint, 0644);
@@ -273,7 +276,7 @@ static void unplug_cpu(int min_active_cpu)
 			continue;
 		l_ip_info = &per_cpu(ip_info, cpu);
 		if (cpu > min_active_cpu)
-			if (l_ip_info->cpu_nr_running < CPU_NR_THRESHOLD)
+			if (l_ip_info->cpu_nr_running < cpu_nr_run_threshold)
 				cpu_down(cpu);
 	}
 }

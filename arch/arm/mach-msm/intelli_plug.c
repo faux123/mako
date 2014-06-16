@@ -22,6 +22,7 @@
 #include <linux/slab.h>
 #include <linux/input.h>
 #include <linux/cpufreq.h>
+//#include <linux/sort.h>
 
 #if CONFIG_POWERSUSPEND
 #include <linux/powersuspend.h>
@@ -31,18 +32,18 @@
 #undef DEBUG_INTELLI_PLUG
 
 #define INTELLI_PLUG_MAJOR_VERSION	3
-#define INTELLI_PLUG_MINOR_VERSION	0
+#define INTELLI_PLUG_MINOR_VERSION	1
 
 #define DEF_SAMPLING_MS			(1000)
 #define BUSY_SAMPLING_MS		(500)
 
-#define DUAL_CORE_PERSISTENCE		7
-#define TRI_CORE_PERSISTENCE		5
-#define QUAD_CORE_PERSISTENCE		3
+#define DUAL_PERSISTENCE		7
+#define TRI_PERSISTENCE			5
+#define QUAD_PERSISTENCE		3
 
 #define BUSY_PERSISTENCE		10
 
-#define CPU_DOWN_FACTOR			2
+#define DOWN_FACTOR			2
 
 static DEFINE_MUTEX(intelli_plug_mutex);
 
@@ -73,8 +74,8 @@ static unsigned int busy_persist_count = 0;
 static bool suspended = false;
 
 struct ip_cpu_info {
-	int cpu;
 	unsigned int curr_max;
+	unsigned long cpu_nr_running;
 };
 
 static DEFINE_PER_CPU(struct ip_cpu_info, ip_info);
@@ -123,6 +124,7 @@ static unsigned int *nr_run_profiles[] = {
 #define NR_RUN_ECO_MODE_PROFILE	3
 #define NR_RUN_HYSTERESIS_QUAD	8
 #define NR_RUN_HYSTERESIS_DUAL	4
+#define CPU_NR_THRESHOLD	10
 
 static unsigned int nr_run_hysteresis = NR_RUN_HYSTERESIS_QUAD;
 module_param(nr_run_hysteresis, uint, 0644);
@@ -133,6 +135,7 @@ static unsigned int NwNs_Threshold[] = { 19, 30,  19,  11,  19,  11, 0,  11};
 static unsigned int TwTs_Threshold[] = {140,  0, 140, 190, 140, 190, 0, 190};
 
 extern unsigned long avg_nr_running(void);
+extern unsigned long avg_cpu_nr_running(unsigned int cpu);
 
 static int mp_decision(void)
 {
@@ -155,7 +158,9 @@ static int mp_decision(void)
 	total_time += this_time;
 
 	rq_depth = rq_info.rq_avg;
-	//pr_info(" rq_deptch = %u", rq_depth);
+#ifdef DEBUG_INTELLI_PLUG
+	pr_info(" rq_deptch = %u", rq_depth);
+#endif
 	nr_cpu_online = num_online_cpus();
 
 	if (nr_cpu_online) {
@@ -231,6 +236,48 @@ static void __cpuinit intelli_plug_boost_fn(struct work_struct *work)
 			cpu_up(1);
 }
 
+/*
+static int cmp_nr_running(const void *a, const void *b)
+{
+	return *(unsigned long *)a - *(unsigned long *)b;
+}
+*/
+
+static void update_per_cpu_stat(void)
+{
+	unsigned int cpu;
+	struct ip_cpu_info *l_ip_info;
+
+	for_each_online_cpu(cpu) {
+		l_ip_info = &per_cpu(ip_info, cpu);
+		l_ip_info->cpu_nr_running = avg_cpu_nr_running(cpu);
+#ifdef DEBUG_INTELLI_PLUG
+		pr_info("cpu %u nr_running => %lu\n", cpu,
+			l_ip_info->cpu_nr_running);
+#endif
+	}
+}
+
+/*
+	sort(nr_running_q, num_possible_cpus(), sizeof(unsigned long),
+		cmp_nr_running, NULL);
+*/
+
+static void unplug_cpu(int min_active_cpu)
+{
+	unsigned int cpu;
+	struct ip_cpu_info *l_ip_info;
+
+	for_each_online_cpu(cpu) {
+		if (cpu == 0)
+			continue;
+		l_ip_info = &per_cpu(ip_info, cpu);
+		if (cpu > min_active_cpu)
+			if (l_ip_info->cpu_nr_running < CPU_NR_THRESHOLD)
+				cpu_down(cpu);
+	}
+}
+
 static void __cpuinit intelli_plug_work_fn(struct work_struct *work)
 {
 	unsigned int nr_run_stat;
@@ -238,10 +285,11 @@ static void __cpuinit intelli_plug_work_fn(struct work_struct *work)
 	unsigned int nr_cpus = 0;
 
 	int decision = 0;
-	int cpu, i;
+	int i;
 
 	if (intelli_plug_active == 1) {
 		nr_run_stat = calculate_thread_stats();
+		update_per_cpu_stat();
 #ifdef DEBUG_INTELLI_PLUG
 		pr_info("nr_run_stat: %u\n", nr_run_stat);
 #endif
@@ -288,50 +336,47 @@ static void __cpuinit intelli_plug_work_fn(struct work_struct *work)
 					persist_count--;
 				if (persist_count == 0) {
 					//take down everyone
-					for_each_online_cpu(cpu)
-						if (cpu != 0)
-							cpu_down(cpu);
+					unplug_cpu(0);
 				}
 #ifdef DEBUG_INTELLI_PLUG
 				pr_info("case 1: %u\n", persist_count);
 #endif
 				break;
 			case 2:
-				persist_count = DUAL_CORE_PERSISTENCE;
+				persist_count = DUAL_PERSISTENCE;
 				if (!decision)
-					persist_count = DUAL_CORE_PERSISTENCE / CPU_DOWN_FACTOR;
+					persist_count =
+					DUAL_PERSISTENCE / DOWN_FACTOR;
 				if (nr_cpus < 2) {
 					for (i = 1; i < cpu_count; i++)
 						cpu_up(i);
 				} else {
-					for_each_online_cpu(cpu)
-						if (cpu > 1)
-							cpu_down(cpu);
+					unplug_cpu(1);
 				}
 #ifdef DEBUG_INTELLI_PLUG
 				pr_info("case 2: %u\n", persist_count);
 #endif
 				break;
 			case 3:
-				persist_count = TRI_CORE_PERSISTENCE;
+				persist_count = TRI_PERSISTENCE;
 				if (!decision)
-					persist_count = TRI_CORE_PERSISTENCE / CPU_DOWN_FACTOR;
+					persist_count =
+					TRI_PERSISTENCE / DOWN_FACTOR;
 				if (nr_cpus < 3) {
 					for (i = 1; i < cpu_count; i++)
 						cpu_up(i);
 				} else {
-					for_each_online_cpu(cpu)
-						if (cpu > 2)
-							cpu_down(cpu);
+					unplug_cpu(2);
 				}
 #ifdef DEBUG_INTELLI_PLUG
 				pr_info("case 3: %u\n", persist_count);
 #endif
 				break;
 			case 4:
-				persist_count = QUAD_CORE_PERSISTENCE;
+				persist_count = QUAD_PERSISTENCE;
 				if (!decision)
-					persist_count = QUAD_CORE_PERSISTENCE / CPU_DOWN_FACTOR;
+					persist_count =
+					QUAD_PERSISTENCE / DOWN_FACTOR;
 				if (nr_cpus < 4)
 					for (i = 1; i < cpu_count; i++)
 						cpu_up(i);
@@ -393,7 +438,7 @@ static void intelli_plug_suspend(struct power_suspend *handler)
 	screen_off_limit(true);
 	mutex_unlock(&intelli_plug_mutex);
 
-	// put rest of the cores to sleep!
+	// put rest of the cores to sleep unconditionally!
 	for_each_online_cpu(cpu) {
 		if (cpu != 0)
 			cpu_down(cpu);
@@ -527,7 +572,6 @@ int __init intelli_plug_init(void)
 {
 	int rc;
 
-	//pr_info("intelli_plug: scheduler delay is: %d\n", delay);
 	pr_info("intelli_plug: version %d.%d by faux123\n",
 		 INTELLI_PLUG_MAJOR_VERSION,
 		 INTELLI_PLUG_MINOR_VERSION);

@@ -124,7 +124,7 @@ static unsigned int *nr_run_profiles[] = {
 #define NR_RUN_ECO_MODE_PROFILE	3
 #define NR_RUN_HYSTERESIS_QUAD	8
 #define NR_RUN_HYSTERESIS_DUAL	4
-#define CPU_NR_THRESHOLD	50
+#define CPU_NR_THRESHOLD	75
 
 static unsigned int cpu_nr_run_threshold = CPU_NR_THRESHOLD;
 module_param(cpu_nr_run_threshold, uint, 0644);
@@ -234,9 +234,10 @@ static void __cpuinit intelli_plug_boost_fn(struct work_struct *work)
 
 	int nr_cpus = num_online_cpus();
 
-	if (touch_boost_active)
-		if (nr_cpus < 2)
-			cpu_up(1);
+	if (intelli_plug_active)
+		if (touch_boost_active)
+			if (nr_cpus < 2)
+				cpu_up(1);
 }
 
 /*

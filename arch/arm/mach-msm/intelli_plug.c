@@ -117,6 +117,11 @@ static unsigned int nr_run_thresholds_eco[] = {
 	UINT_MAX
 };
 
+static unsigned int nr_run_thresholds_eco_extreme[] = {
+        (THREAD_CAPACITY * 750 * MULT_FACTOR) / DIV_FACTOR,
+	UINT_MAX
+};
+
 static unsigned int nr_run_thresholds_disable[] = {
 	0,  0,  0,  UINT_MAX
 };
@@ -126,6 +131,7 @@ static unsigned int *nr_run_profiles[] = {
 	nr_run_thresholds_performance,
 	nr_run_thresholds_conservative,
 	nr_run_thresholds_eco,
+	nr_run_thresholds_eco_extreme,
 	nr_run_thresholds_disable,
 };
 

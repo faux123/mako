@@ -156,7 +156,8 @@ static unsigned int calculate_thread_stats(void)
 	unsigned int threshold_size;
 	unsigned int *current_profile;
 
-	if (!eco_mode_active) {
+	if (!eco_mode_active ||
+		!(nr_run_profile_sel == NR_RUN_ECO_MODE_PROFILE)) {
 		current_profile = nr_run_profiles[nr_run_profile_sel];
 		threshold_size =
 			ARRAY_SIZE(nr_run_thresholds_balance);
@@ -250,7 +251,7 @@ static void __cpuinit intelli_plug_work_fn(struct work_struct *work)
 
 	int i;
 
-	if (intelli_plug_active == 1) {
+	if (intelli_plug_active) {
 		nr_run_stat = calculate_thread_stats();
 		update_per_cpu_stat();
 #ifdef DEBUG_INTELLI_PLUG

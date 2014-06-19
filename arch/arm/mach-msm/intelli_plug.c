@@ -22,13 +22,12 @@
 #include <linux/slab.h>
 #include <linux/input.h>
 #include <linux/cpufreq.h>
-//#include <linux/sort.h>
 
 //#define DEBUG_INTELLI_PLUG
 #undef DEBUG_INTELLI_PLUG
 
 #define INTELLI_PLUG_MAJOR_VERSION	3
-#define INTELLI_PLUG_MINOR_VERSION	5
+#define INTELLI_PLUG_MINOR_VERSION	6
 
 #define DEF_SAMPLING_MS			(268)
 
@@ -36,7 +35,7 @@
 #define TRI_PERSISTENCE			(1700 / DEF_SAMPLING_MS)
 #define QUAD_PERSISTENCE		(1000 / DEF_SAMPLING_MS)
 
-#define BUSY_PERSISTENCE		(5000 / DEF_SAMPLING_MS)
+#define BUSY_PERSISTENCE		(3500 / DEF_SAMPLING_MS)
 
 static DEFINE_MUTEX(intelli_plug_mutex);
 
@@ -85,8 +84,8 @@ defined(CONFIG_ARCH_MSM8926)
 #define MULT_FACTOR	4
 #define DIV_FACTOR	100000
 #define NR_FSHIFT	3
+
 static unsigned int nr_fshift = NR_FSHIFT;
-module_param(nr_fshift, uint, 0644);
 
 static unsigned int nr_run_thresholds_balance[] = {
 	(THREAD_CAPACITY * 625 * MULT_FACTOR) / DIV_FACTOR,
@@ -136,7 +135,10 @@ static unsigned int *nr_run_profiles[] = {
 #define NR_RUN_HYSTERESIS_QUAD	8
 #define NR_RUN_HYSTERESIS_DUAL	4
 
-#define CPU_NR_THRESHOLD	(12 * THREAD_CAPACITY / 100)
+#define CPU_NR_THRESHOLD	(17 * THREAD_CAPACITY / 100)
+
+static unsigned int nr_possible_cores;
+module_param(nr_possible_cores, uint, 0444);
 
 static unsigned int cpu_nr_run_threshold = CPU_NR_THRESHOLD;
 module_param(cpu_nr_run_threshold, uint, 0644);
@@ -163,10 +165,6 @@ static unsigned int calculate_thread_stats(void)
 	else
 		threshold_size =
 			ARRAY_SIZE(nr_run_thresholds_eco);
-
-#ifdef DEBUG_INTELLI_PLUG
-		pr_info("intelliplug: full mode active!");
-#endif
 
 	nr_fshift = num_possible_cpus() - 1;
 
@@ -216,11 +214,6 @@ static void update_per_cpu_stat(void)
 #endif
 	}
 }
-
-/*
-	sort(nr_running_q, num_possible_cpus(), sizeof(unsigned long),
-		cmp_nr_running, NULL);
-*/
 
 static void unplug_cpu(int min_active_cpu)
 {
@@ -487,11 +480,13 @@ int __init intelli_plug_init(void)
 {
 	int rc;
 
+	nr_possible_cores = num_possible_cpus();
+
 	pr_info("intelli_plug: version %d.%d by faux123\n",
 		 INTELLI_PLUG_MAJOR_VERSION,
 		 INTELLI_PLUG_MINOR_VERSION);
 
-	if (num_possible_cpus() > 2) {
+	if (nr_possible_cores > 2) {
 		nr_run_hysteresis = NR_RUN_HYSTERESIS_QUAD;
 		nr_run_profile_sel = 0;
 	} else {

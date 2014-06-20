@@ -392,6 +392,13 @@ obj-$(CONFIG_DEBUG_FS) += msm_cpr-debug.o
 endif
 obj-$(CONFIG_MSM_CPU_PWRCTL) +=  msm_cpu_pwrctl.o
 obj-$(CONFIG_FORCE_FAST_CHARGE) += fastchg.o
-obj-$(CONFIG_INTELLI_PLUG) += intelli_plug.o
+
+obj-$(CONFIG_ARCH_MSM8974) += msm_mpmctr.o
+obj-$(CONFIG_MSM_CPR_REGULATOR) += cpr-regulator.o
+obj-$(CONFIG_CPU_FREQ_MSM) += cpufreq.o
+
+obj-$(CONFIG_WALL_CLK) += wallclk.o
+obj-$(CONFIG_WALL_CLK_SYSFS) += wallclk_sysfs.o
+>>>>>>> e5db767... intelli_plug: move to its own directory. It's been cross platform for a while
 obj-$(CONFIG_MSM_CPUFREQ_LIMITER) += cpufreq_limit.o
 obj-$(CONFIG_TURBO_BOOST) += msm_turbo.o

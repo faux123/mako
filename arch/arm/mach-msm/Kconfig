@@ -1621,12 +1621,6 @@ config LOW_CPUCLOCKS
 	help
 	  Ultra low cpu frequencies enabled for CPU and L2 Cache
 
-config INTELLI_PLUG
-	bool "Enable intelli-plug cpu hotplug driver"
-	default n
-	help
-	  Generic Intelli-plug cpu hotplug driver for ARM SOCs
-
 config MSM_CPUFREQ_LIMITER
 	tristate "MSM CPU frequency limiter"
 	default n

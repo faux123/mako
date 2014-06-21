@@ -13,7 +13,6 @@
  * GNU General Public License for more details.
  *
  */
-#include <linux/earlysuspend.h>
 #include <linux/workqueue.h>
 #include <linux/cpu.h>
 #include <linux/sched.h>
@@ -22,6 +21,10 @@
 #include <linux/slab.h>
 #include <linux/input.h>
 #include <linux/cpufreq.h>
+
+#if CONFIG_POWERSUSPEND
+#include <linux/powersuspend.h>
+#endif
 
 //#define DEBUG_INTELLI_PLUG
 #undef DEBUG_INTELLI_PLUG
@@ -307,7 +310,7 @@ static void __cpuinit intelli_plug_work_fn(struct work_struct *work)
 		msecs_to_jiffies(sampling_time));
 }
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
+#ifdef CONFIG_POWERSUSPEND
 static void screen_off_limit(bool on)
 {
 	unsigned int i, ret;
@@ -336,7 +339,7 @@ static void screen_off_limit(bool on)
 	}
 }
 
-static void intelli_plug_early_suspend(struct early_suspend *handler)
+static void intelli_plug_suspend(struct power_suspend *handler)
 {
 	int cpu;
 	
@@ -369,7 +372,7 @@ static void wakeup_boost(void)
 	}
 }
 
-static void __cpuinit intelli_plug_late_resume(struct early_suspend *handler)
+static void __cpuinit intelli_plug_resume(struct power_suspend *handler)
 {
 	int num_of_active_cores;
 	int i;
@@ -394,12 +397,11 @@ static void __cpuinit intelli_plug_late_resume(struct early_suspend *handler)
 		msecs_to_jiffies(10));
 }
 
-static struct early_suspend intelli_plug_early_suspend_struct_driver = {
-	.level = EARLY_SUSPEND_LEVEL_DISABLE_FB + 10,
-	.suspend = intelli_plug_early_suspend,
-	.resume = intelli_plug_late_resume,
+static struct power_suspend intelli_plug_power_suspend_driver = {
+	.suspend = intelli_plug_suspend,
+	.resume = intelli_plug_resume,
 };
-#endif	/* CONFIG_HAS_EARLYSUSPEND */
+#endif  /* CONFIG_POWERSUSPEND */
 
 static void intelli_plug_input_event(struct input_handle *handle,
 		unsigned int type, unsigned int code, int value)
@@ -407,7 +409,6 @@ static void intelli_plug_input_event(struct input_handle *handle,
 #ifdef DEBUG_INTELLI_PLUG
 	pr_info("intelli_plug touched!\n");
 #endif
-
 	queue_delayed_work_on(0, intelliplug_wq, &intelli_plug_boost,
 		msecs_to_jiffies(10));
 }
@@ -495,6 +496,10 @@ int __init intelli_plug_init(void)
 	}
 
 	rc = input_register_handler(&intelli_plug_input_handler);
+#ifdef CONFIG_POWERSUSPEND
+	register_power_suspend(&intelli_plug_power_suspend_driver);
+#endif
+
 	intelliplug_wq = alloc_workqueue("intelliplug",
 				WQ_HIGHPRI | WQ_UNBOUND, 1);
 	intelliplug_boost_wq = alloc_workqueue("iplug_boost",
@@ -504,9 +509,6 @@ int __init intelli_plug_init(void)
 	queue_delayed_work_on(0, intelliplug_wq, &intelli_plug_work,
 		msecs_to_jiffies(10));
 
-#ifdef CONFIG_HAS_EARLYSUSPEND
-	register_early_suspend(&intelli_plug_early_suspend_struct_driver);
-#endif
 	return 0;
 }
 

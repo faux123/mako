@@ -81,9 +81,11 @@ module_param(screen_off_max, uint, 0644);
 #define CAPACITY_RESERVE	50
 
 #if defined(CONFIG_ARCH_MSM8960) || defined(CONFIG_ARCH_APQ8064) || \
-defined(CONFIG_ARCH_MSM8974) || defined(CONFIG_ARCH_MSM8226) || \
-defined(CONFIG_ARCH_MSM8926)
+defined(CONFIG_ARCH_MSM8974)
 #define THREAD_CAPACITY	(339 - CAPACITY_RESERVE)
+#elif defined(CONFIG_ARCH_MSM8226) || defined (CONFIG_ARCH_MSM8926) || \
+defined (CONFIG_ARCH_MSM8610) || defined (CONFIG_ARCH_MSM8228)
+#define THREAD_CAPACITY (190 - CAPACITY_RESERVE)
 #else
 #define THREAD_CAPACITY	(250 - CAPACITY_RESERVE)
 #endif

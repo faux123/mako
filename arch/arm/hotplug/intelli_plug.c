@@ -144,7 +144,7 @@ static unsigned int *nr_run_profiles[] = {
 #define NR_RUN_HYSTERESIS_QUAD	8
 #define NR_RUN_HYSTERESIS_DUAL	4
 
-#define CPU_NR_THRESHOLD	(17 * THREAD_CAPACITY / 100)
+#define CPU_NR_THRESHOLD	((THREAD_CAPACITY << 1) + (THREAD_CAPACITY / 2))
 
 static unsigned int nr_possible_cores;
 module_param(nr_possible_cores, uint, 0444);
@@ -228,13 +228,16 @@ static void unplug_cpu(int min_active_cpu)
 {
 	unsigned int cpu;
 	struct ip_cpu_info *l_ip_info;
+	int l_nr_threshold;
 
 	for_each_online_cpu(cpu) {
+		l_nr_threshold =
+			cpu_nr_run_threshold << 1 / (num_online_cpus());
 		if (cpu == 0)
 			continue;
 		l_ip_info = &per_cpu(ip_info, cpu);
 		if (cpu > min_active_cpu)
-			if (l_ip_info->cpu_nr_running < cpu_nr_run_threshold)
+			if (l_ip_info->cpu_nr_running < l_nr_threshold)
 				cpu_down(cpu);
 	}
 }

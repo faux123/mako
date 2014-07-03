@@ -366,19 +366,21 @@ static void intelli_plug_suspend(struct power_suspend *handler)
 static void intelli_plug_suspend(struct early_suspend *handler)
 #endif
 {
-	int cpu;
+	if (intelli_plug_active) {
+		int cpu;
 	
-	flush_workqueue(intelliplug_wq);
+		flush_workqueue(intelliplug_wq);
 
-	mutex_lock(&intelli_plug_mutex);
-	suspended = true;
-	screen_off_limit(true);
-	mutex_unlock(&intelli_plug_mutex);
+		mutex_lock(&intelli_plug_mutex);
+		suspended = true;
+		screen_off_limit(true);
+		mutex_unlock(&intelli_plug_mutex);
 
-	// put rest of the cores to sleep unconditionally!
-	for_each_online_cpu(cpu) {
-		if (cpu != 0)
-			cpu_down(cpu);
+		// put rest of the cores to sleep unconditionally!
+		for_each_online_cpu(cpu) {
+			if (cpu != 0)
+				cpu_down(cpu);
+		}
 	}
 }
 
@@ -403,25 +405,27 @@ static void __cpuinit intelli_plug_resume(struct power_suspend *handler)
 static void __cpuinit intelli_plug_resume(struct early_suspend *handler)
 #endif
 {
-	int num_of_active_cores;
-	int i;
 
-	mutex_lock(&intelli_plug_mutex);
-	/* keep cores awake long enough for faster wake up */
-	persist_count = BUSY_PERSISTENCE;
-	suspended = false;
-	mutex_unlock(&intelli_plug_mutex);
+	if (intelli_plug_active) {
+		int num_of_active_cores;
+		int i;
 
-	/* wake up everyone */
-	num_of_active_cores = num_possible_cpus();
+		mutex_lock(&intelli_plug_mutex);
+		/* keep cores awake long enough for faster wake up */
+		persist_count = BUSY_PERSISTENCE;
+		suspended = false;
+		mutex_unlock(&intelli_plug_mutex);
 
-	for (i = 1; i < num_of_active_cores; i++) {
-		cpu_up(i);
+		/* wake up everyone */
+		num_of_active_cores = num_possible_cpus();
+
+		for (i = 1; i < num_of_active_cores; i++) {
+			cpu_up(i);
+		}
+
+		screen_off_limit(false);
+		wakeup_boost();
 	}
-
-	screen_off_limit(false);
-	wakeup_boost();
-
 	queue_delayed_work_on(0, intelliplug_wq, &intelli_plug_work,
 		msecs_to_jiffies(10));
 }

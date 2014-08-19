@@ -135,7 +135,7 @@ int snd_hax_reg_access(unsigned int reg)
 		case TABLA_A_RX_HPH_R_GAIN:
 		case TABLA_A_RX_HPH_L_STATUS:
 		case TABLA_A_RX_HPH_R_STATUS:
-			if (snd_rec_ctrl_locked > 1)
+			if (snd_ctrl_locked > 1)
 				ret = 0;
 			break;
 		case TABLA_A_CDC_RX1_VOL_CTL_B2_CTL:
@@ -158,7 +158,7 @@ int snd_hax_reg_access(unsigned int reg)
 		case TABLA_A_CDC_TX8_VOL_CTL_GAIN:
 		case TABLA_A_CDC_TX9_VOL_CTL_GAIN:
 		case TABLA_A_CDC_TX10_VOL_CTL_GAIN:
-			if (snd_ctrl_locked > 0)
+			if (snd_rec_ctrl_locked > 0)
 				ret = 0;
 			break;
 		default:

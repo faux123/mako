@@ -396,7 +396,7 @@ static ssize_t sound_control_rec_locked_store(struct kobject *kobj,
 
 static ssize_t sound_control_rec_locked_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
-	return sprintf(buf, "%d\n", snd_ctrl_locked);
+	return sprintf(buf, "%d\n", snd_rec_ctrl_locked);
 }
 
 static struct kobj_attribute sound_reg_sel_attribute =

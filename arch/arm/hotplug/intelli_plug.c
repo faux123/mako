@@ -22,7 +22,7 @@
 #include <linux/input.h>
 #include <linux/cpufreq.h>
 
-#if CONFIG_POWERSUSPEND
+#ifdef CONFIG_POWERSUSPEND
 #include <linux/powersuspend.h>
 #endif
 

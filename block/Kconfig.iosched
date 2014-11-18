@@ -75,15 +75,9 @@ choice
 	config DEFAULT_CFQ
 		bool "CFQ" if IOSCHED_CFQ=y
 
-<<<<<<< HEAD
-=======
-	config DEFAULT_BFQ
-		bool "BFQ" if IOSCHED_BFQ=y
-
 	config DEFAULT_FIOPS
 		bool "FIOPS" if IOSCHED_FIOPS=y
 
->>>>>>> 1944b92... block: fiops ioscheduler core
 	config DEFAULT_NOOP
 		bool "No-op"
 
@@ -93,11 +87,7 @@ config DEFAULT_IOSCHED
 	string
 	default "deadline" if DEFAULT_DEADLINE
 	default "cfq" if DEFAULT_CFQ
-<<<<<<< HEAD
-=======
 	default "fiops" if DEFAULT_FIOPS
-	default "bfq" if DEFAULT_BFQ
->>>>>>> 1944b92... block: fiops ioscheduler core
 	default "noop" if DEFAULT_NOOP
 
 endmenu
